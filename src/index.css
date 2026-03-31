@@ -1,0 +1,315 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  padding: 0;
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+code {
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+@font-face {
+  font-family: "GeelyBold";
+  src: url("./assets/fonts/GEELYBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Geely";
+  src: url("./assets/fonts/geelyLight.ttf") format("truetype");
+  font-weight: 300 700;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "InterRegular";
+  src: url("./assets/fonts/Inter2/Inter-Regular.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "InterSemiBold";
+  src: url("./assets/fonts/Inter2/Inter-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "InterBold";
+  src: url("./assets/fonts/Inter2/Inter-Bold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+}
+
+@keyframes blueGlow {
+  0% {
+    box-shadow:
+      0 0 8px #b3ecff,
+      0 0 16px #b3ecff,
+      0 0 24px #b3ecff;
+  }
+  50% {
+    box-shadow:
+      0 0 16px #b3ecff,
+      0 0 24px #b3ecff,
+      0 0 40px #b3ecff;
+  }
+  100% {
+    box-shadow:
+      0 0 8px #b3ecff,
+      0 0 16px #b3ecff,
+      0 0 24px #b3ecff;
+  }
+}
+
+.glow-animate {
+  animation: blueGlow 1.5s ease-in-out infinite;
+}
+
+.loader {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  display: inline-block;
+  position: relative;
+  background: linear-gradient(0deg, #dedede 10%, #04113f 100%);
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+}
+
+.loader::after {
+  content: "";
+  box-sizing: border-box;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #000000b3;
+  z-index: 1;
+}
+
+/* Teks Loading di Tengah */
+.loader-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-weight: bold;
+  z-index: 2;
+  animation: blink 1s step-start infinite;
+}
+
+/* Animasi Blink */
+@keyframes blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* Animasi Loader Muter */
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes glowPulse {
+  0% {
+    filter: drop-shadow(0 0 4px rgba(0, 128, 255, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgb(0, 191, 255));
+  }
+  100% {
+    filter: drop-shadow(0 0 4px rgba(0, 128, 255, 0.4));
+  }
+}
+
+.animate-glow {
+  animation: glowPulse 1.5s ease-in-out infinite;
+}
+
+/* --- Efek glow lembut (aktif) --- */
+@keyframes glowPulseModel {
+  0% {
+    box-shadow:
+      0 0 10px rgba(59, 59, 59, 0.3),
+      0 0 20px rgba(59, 59, 59, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 25px rgba(0, 0, 0, 0.8),
+      0 0 50px rgba(0, 0, 0, 0.6);
+  }
+  100% {
+    box-shadow:
+      0 0 10px rgba(59, 59, 59, 0.3),
+      0 0 20px rgba(59, 59, 59, 0.3);
+  }
+}
+
+.glow-pulse {
+  animation: glowPulseModel 2s ease-in-out infinite;
+}
+
+/* --- Efek flash ketika diklik --- */
+@keyframes flashGlow {
+  0% {
+    box-shadow: 0 0 0px rgba(255, 255, 255, 0);
+    filter: brightness(1);
+  }
+  30% {
+    box-shadow: 0 0 60px rgba(255, 255, 255, 0.9);
+    filter: brightness(1.6);
+  }
+  100% {
+    box-shadow: 0 0 0px rgba(255, 255, 255, 0);
+    filter: brightness(1);
+  }
+}
+
+.flash-glow {
+  animation: flashGlow 0.6s ease-out;
+}
+
+/* ==== GOLD 3D TEXT EFFECT ==== */
+/* ==== WHITE 3D TEXT EFFECT ==== */
+.text-white-3d {
+  color: #ffffff;
+  text-shadow:
+    0px 2px 2px rgba(0, 0, 0, 0.4),
+    0px 4px 6px rgba(0, 0, 0, 0.25),
+    0px -1px 0px rgba(255, 255, 255, 0.6);
+  font-weight: 800;
+  letter-spacing: 1px;
+  transition: all 0.2s ease-in-out;
+}
+
+/* Tambahan efek kilau halus (opsional) */
+@keyframes whiteShine {
+  0% {
+    text-shadow:
+      0px 2px 2px rgba(0, 0, 0, 0.4),
+      0px 4px 6px rgba(0, 0, 0, 0.25),
+      0px -1px 0px rgba(255, 255, 255, 0.6);
+  }
+  50% {
+    text-shadow:
+      0px 2px 4px rgba(255, 255, 255, 0.7),
+      0px 4px 10px rgba(255, 255, 255, 0.4);
+  }
+  100% {
+    text-shadow:
+      0px 2px 2px rgba(0, 0, 0, 0.4),
+      0px 4px 6px rgba(0, 0, 0, 0.25),
+      0px -1px 0px rgba(255, 255, 255, 0.6);
+  }
+}
+
+.text-white-3d.shine {
+  animation: whiteShine 2s ease-in-out infinite;
+}
+
+/* ==== GOLD 3D TEXT (FFB848 → 8F6B2) ==== */
+.text-gold-3d {
+  background: linear-gradient(180deg, #ffb848 500%, #8f6b2f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0px 2px 2px rgba(0, 0, 0, 0.3),
+    0px 4px 4px rgba(0, 0, 0, 0.25),
+    0px -1px 0px rgba(255, 255, 255, 0.3);
+  font-weight: 800;
+  letter-spacing: 1px;
+  transition: all 0.2s ease-in-out;
+}
+
+/* Efek kilau halus opsional */
+@keyframes goldShine {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: 200px 0;
+  }
+}
+
+.text-gold-3d.shine {
+  background-size: 200%;
+  animation: goldShine 2.5s linear infinite;
+}
+
+@layer components {
+  .btn-geely {
+    @apply font-bold px-24 py-6 text-[50px] text-black rounded-[25px]
+           transition-all duration-300 active:scale-95 min-w-[380px]
+           bg-gradient-to-b from-[#d2d8e1] to-[#76849b]
+           shadow-[4px_4px_8px_#b4b9bf,_-4px_-4px_8px_#f5f8fb]
+           active:from-[#7188a0] active:to-[#3f4a55] active:shadow-inner active:text-white;
+  }
+
+  /* 🔵 versi kotak — buat tombol dengan ikon (misal back, next, dsb) */
+  .btn-geely-square {
+    @apply flex items-center justify-center w-32 h-32 text-black rounded-[25px]
+           transition-all duration-300 active:scale-95
+           bg-gradient-to-b from-[#d2d8e1] to-[#76849b]
+           shadow-[4px_4px_8px_#b4b9bf,_-4px_-4px_8px_#f5f8fb]
+           active:from-[#7188a0] active:to-[#3f4a55] active:shadow-inner active:text-white;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #bbb;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #888;
+}
+
+@keyframes binaryScroll {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+.animate-binary {
+  animation: binaryScroll 18s linear infinite;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
