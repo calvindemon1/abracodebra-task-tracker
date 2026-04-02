@@ -1,5 +1,5 @@
 import { createResource, createSignal, For, Show, onMount } from "solid-js";
-import { TeamsService } from "../../../services/teams"; // Pastikan path benar
+import { TeamsService } from "../../../services/teams";
 import {
   Edit,
   Trash2,
@@ -8,8 +8,11 @@ import {
   Save,
   X,
   ChevronLeft,
+  ChevronRight,
   Users2,
   Loader2,
+  Briefcase,
+  UserCheck,
 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import Swal from "sweetalert2";
@@ -18,11 +21,32 @@ export default function Teams() {
   const navigate = useNavigate();
   const [isMounted, setIsMounted] = createSignal(false);
 
-  // FETCH DATA: Ambil res.data karena axios membungkus response-nya
+  // PAGINATION STATES (Client-Side)
+  const [page, setPage] = createSignal(1);
+  const [perPage] = createSignal(5);
+
+  // FETCH DATA
   const [teams, { refetch }] = createResource(async () => {
-    const res = await TeamsService.list();
-    return res.data; // Sesuaikan dengan struktur JSON dari backend lu
+    try {
+      const res = await TeamsService.list();
+      // Pastikan return array data (biasanya res.data di axios)
+      return res.data || res;
+    } catch (err) {
+      console.error("Error fetch teams:", err);
+      return [];
+    }
   });
+
+  // LOGIC PAGINATION (Memotong data yang sudah di-fetch)
+  const paginatedTeams = () => {
+    const allData = teams() || [];
+    const start = (page() - 1) * perPage();
+    const end = start + perPage();
+    return allData.slice(start, end);
+  };
+
+  // Hitung total halaman
+  const totalPages = () => Math.ceil((teams()?.length || 0) / perPage());
 
   const [name, setName] = createSignal("");
   const [editingId, setEditingId] = createSignal(null);
@@ -31,6 +55,14 @@ export default function Teams() {
   onMount(() => {
     setTimeout(() => setIsMounted(true), 50);
   });
+
+  // Handler Navigasi Halaman
+  const nextPage = () => {
+    if (page() < totalPages()) setPage((p) => p + 1);
+  };
+  const prevPage = () => {
+    if (page() > 1) setPage((p) => p - 1);
+  };
 
   const submit = async (e) => {
     if (e) e.preventDefault();
@@ -52,36 +84,31 @@ export default function Teams() {
         Swal.fire({
           icon: "success",
           title: "UPDATED",
-          text: "Data tim aman, udah diperbarui ✅",
-          timer: 1500,
-          showConfirmButton: false,
           background: "#0a0a0a",
           color: "#fff",
+          timer: 1500,
+          showConfirmButton: false,
         });
       } else {
         await TeamsService.create({ team_name: name() });
         Swal.fire({
           icon: "success",
           title: "DONE",
-          text: "Tim baru udah join di sistem ✅",
-          timer: 1500,
-          showConfirmButton: false,
           background: "#0a0a0a",
           color: "#fff",
+          timer: 1500,
+          showConfirmButton: false,
         });
       }
       setName("");
       setEditingId(null);
-      refetch(); // Refresh list otomatis
+      refetch();
     } catch (err) {
-      console.error(err);
       Swal.fire({
         icon: "error",
         title: "FAILED",
-        text: "Gagal simpan data tim bro!",
         background: "#0a0a0a",
         color: "#fff",
-        confirmButtonColor: "#ef4444",
       });
     } finally {
       setLoading(false);
@@ -90,20 +117,16 @@ export default function Teams() {
 
   const startEdit = (item) => {
     setEditingId(item.id);
-    setName(item.team_name);
+    setName(item.name);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const remove = async (id) => {
     const confirm = await Swal.fire({
-      title: "HAPUS PERMANEN?",
-      text: "Data tim ini bakal ilang selamanya!",
+      title: "HAPUS?",
       icon: "warning",
       showCancelButton: true,
-      confirmButtonText: "Sikat Hapus!",
-      cancelButtonText: "Jangan!",
       confirmButtonColor: "#ef4444",
-      cancelButtonColor: "#333",
       background: "#0a0a0a",
       color: "#fff",
     });
@@ -115,7 +138,6 @@ export default function Teams() {
       Swal.fire({
         icon: "success",
         title: "BERES",
-        text: "Tim udah diapus dari list.",
         background: "#0a0a0a",
         color: "#fff",
         timer: 1500,
@@ -126,7 +148,6 @@ export default function Teams() {
       Swal.fire({
         icon: "error",
         title: "ERROR",
-        text: "Gagal hapus data!",
         background: "#0a0a0a",
         color: "#fff",
       });
@@ -134,7 +155,7 @@ export default function Teams() {
   };
 
   return (
-    <div class="p-6 min-h-screen text-white overflow-hidden">
+    <div class="p-6 min-h-screen text-white overflow-hidden font-sans">
       <style>{`
         .page-enter { animation: pageIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes pageIn {
@@ -158,9 +179,9 @@ export default function Teams() {
       `}</style>
 
       <div
-        class={`max-w-5xl mx-auto space-y-10 ${isMounted() ? "page-enter" : "opacity-0"}`}
+        class={`max-w-6xl mx-auto space-y-10 ${isMounted() ? "page-enter" : "opacity-0"}`}
       >
-        {/* HEADER AREA */}
+        {/* HEADER */}
         <div class="flex justify-between items-end">
           <div>
             <div class="flex items-center gap-3 mb-2">
@@ -186,14 +207,14 @@ export default function Teams() {
         {/* INPUT FORM */}
         <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 p-10 shadow-2xl">
           <label class="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6 block">
-            {editingId() ? "Update Team Detail" : "Create New Division"}
+            {editingId() ? "Update Team Detail" : "Create New Team"}
           </label>
           <form onSubmit={submit} class="flex flex-col md:flex-row gap-4">
             <div class="flex-1">
               <input
                 type="text"
-                class="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 text-xl font-bold outline-none focus:border-indigo-500 focus:bg-white/10 transition-all placeholder:text-gray-700"
-                placeholder="Misal: Creative Team, Video Editor..."
+                class="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 text-xl font-bold outline-none focus:border-indigo-500 focus:bg-white/10 transition-all placeholder:text-gray-700 text-white"
+                placeholder="Misal: Developer Team, Marketing..."
                 value={name()}
                 onInput={(e) => setName(e.target.value)}
                 disabled={loading()}
@@ -203,11 +224,7 @@ export default function Teams() {
               <button
                 type="submit"
                 disabled={loading()}
-                class={`flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-2xl ${
-                  editingId()
-                    ? "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20"
-                    : "bg-white text-black hover:bg-gray-200"
-                }`}
+                class={`px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center gap-3 ${editingId() ? "bg-indigo-600 shadow-indigo-600/20" : "bg-white text-black hover:bg-gray-200"}`}
               >
                 <Show
                   when={loading()}
@@ -219,7 +236,6 @@ export default function Teams() {
                 </Show>
                 {editingId() ? "Simpan" : "Tambah"}
               </button>
-
               <Show when={editingId() && !loading()}>
                 <button
                   type="button"
@@ -237,13 +253,15 @@ export default function Teams() {
         </div>
 
         {/* TABLE LIST AREA */}
-        <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 overflow-hidden shadow-2xl">
+        <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 overflow-hidden shadow-2xl flex flex-col">
           <table class="w-full text-left">
             <thead class="bg-white/5 text-[10px] uppercase font-black tracking-[0.3em] text-gray-500 border-b border-white/5">
               <tr>
-                <th class="p-8 w-24 text-center text-gray-600 font-mono">NO</th>
-                <th class="p-8 text-gray-400">Team Name / Division</th>
-                <th class="p-8 text-right text-gray-600 w-40">Actions</th>
+                <th class="p-8 w-20 text-center text-gray-600">ID</th>
+                <th class="p-8">Team Info</th>
+                <th class="p-8 text-center">Division</th>
+                <th class="p-8 text-center">Members</th>
+                <th class="p-8 text-right">Actions</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-white/5">
@@ -253,7 +271,7 @@ export default function Teams() {
                   <For each={[1, 2, 3]}>
                     {() => (
                       <tr>
-                        <td colspan="3" class="p-8">
+                        <td colspan="5" class="p-8">
                           <div class="h-12 w-full shimmer rounded-2xl"></div>
                         </td>
                       </tr>
@@ -262,34 +280,57 @@ export default function Teams() {
                 }
               >
                 <Show
-                  when={teams()?.length > 0}
+                  when={paginatedTeams().length > 0}
                   fallback={
                     <tr>
                       <td
-                        colspan="3"
-                        class="p-20 text-center text-gray-600 italic font-black uppercase tracking-widest opacity-20"
+                        colspan="5"
+                        class="p-20 text-center text-gray-600 uppercase tracking-widest opacity-20"
                       >
-                        Belum ada tim yang terdaftar
+                        Belum ada tim terdaftar
                       </td>
                     </tr>
                   }
                 >
-                  <For each={teams()}>
+                  {/* Kita looping data yang sudah dipotong (paginatedTeams) */}
+                  <For each={paginatedTeams()}>
                     {(item, i) => (
                       <tr
                         class="row-item group hover:bg-white/[0.03] transition-all duration-500"
-                        style={{ "animation-delay": `${i() * 0.1}s` }}
+                        style={{ "animation-delay": `${i() * 0.05}s` }}
                       >
                         <td class="p-8 text-center text-gray-600 font-mono text-xs">
-                          {i() + 1}
+                          {item.id}
                         </td>
                         <td class="p-8">
                           <div class="flex items-center gap-4">
-                            <div class="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
-                              <Users2 size={18} />
+                            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform border border-white/5">
+                              <Users2 size={20} />
                             </div>
-                            <span class="text-xl font-black tracking-tight group-hover:text-indigo-400 transition-colors">
-                              {item.team_name}
+                            <div class="flex flex-col">
+                              <span class="text-xl font-black tracking-tight group-hover:text-indigo-400 transition-colors uppercase italic">
+                                {item.name}
+                              </span>
+                              <span class="text-[9px] text-gray-600 font-bold uppercase tracking-widest">
+                                Created:{" "}
+                                {new Date(item.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td class="p-8 text-center">
+                          <div class="inline-flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5">
+                            <Briefcase size={12} class="text-gray-500" />
+                            <span class="text-xs font-bold text-gray-400">
+                              ID: {item.division_id}
+                            </span>
+                          </div>
+                        </td>
+                        <td class="p-8 text-center">
+                          <div class="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 rounded-full border border-indigo-500/20">
+                            <UserCheck size={12} class="text-indigo-400" />
+                            <span class="text-xs font-black text-indigo-400">
+                              {item.total_users} Users
                             </span>
                           </div>
                         </td>
@@ -316,6 +357,36 @@ export default function Teams() {
               </Show>
             </tbody>
           </table>
+
+          {/* PAGINATION CONTROLS (Glassmorphism) */}
+          <div class="p-6 bg-white/[0.02] border-t border-white/5 flex items-center justify-between">
+            <div class="flex flex-col">
+              <span class="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                Page {page()} of {totalPages()}
+              </span>
+              <span class="text-[9px] text-gray-600 font-bold uppercase mt-1">
+                Total Data: {teams()?.length || 0} teams
+              </span>
+            </div>
+            <div class="flex gap-4">
+              <button
+                onClick={prevPage}
+                disabled={page() === 1 || teams.loading}
+                class="p-4 rounded-2xl bg-white/5 hover:bg-white/10 disabled:opacity-10 disabled:cursor-not-allowed transition-all text-gray-400 hover:text-white"
+                title="Previous Page"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={nextPage}
+                disabled={page() >= totalPages() || teams.loading}
+                class="p-4 rounded-2xl bg-white/5 hover:bg-white/10 disabled:opacity-10 disabled:cursor-not-allowed transition-all text-gray-400 hover:text-white"
+                title="Next Page"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

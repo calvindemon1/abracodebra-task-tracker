@@ -1,9 +1,19 @@
-import { createSignal, onMount, Show, For, createMemo, batch } from "solid-js";
+import { createSignal, onMount, Show, For, createEffect, on } from "solid-js";
+import { createStore } from "solid-js/store";
 import { useNavigate, useParams } from "@solidjs/router";
-import { Loader2, ChevronLeft, Save, Trash2, CheckCircle2 } from "lucide-solid";
+import {
+  Loader2,
+  Trash2,
+  CheckCircle2,
+  Layers,
+  Plus,
+  ChevronDown,
+} from "lucide-solid";
 import Swal from "sweetalert2";
 import { TasksService } from "../../../services/tasks";
 import { UsersService } from "../../../services/users";
+import { ProjectsService } from "../../../services/projects";
+import { WorksService } from "../../../services/works";
 
 const CATEGORIES = [
   "Graphic Design",
@@ -13,213 +23,277 @@ const CATEGORIES = [
   "Development",
 ];
 
+const toast = (title, icon = "success") => {
+  Swal.fire({
+    title,
+    icon,
+    toast: true,
+    position: "top-end",
+    showConfirmButton: false,
+    timer: 2000,
+    timerProgressBar: true,
+    background: "#0a0a0a",
+    color: "#fff",
+  });
+};
+
 export default function TaskForm() {
   const navigate = useNavigate();
   const params = useParams();
-  const isEdit = () => !!params.id;
-  const logRefs = {};
-
   const [isLoading, setIsLoading] = createSignal(false);
-  const [isSaving, setIsSaving] = createSignal(false);
   const [users, setUsers] = createSignal([]);
+  const [projects, setProjects] = createSignal([]);
+  const [projectId, setProjectId] = createSignal("");
 
-  const [form, setForm] = createSignal({
-    title: "",
-    assignee_id: "",
-    status: "TODO",
-    priority: "NORMAL",
-    start_date: new Date().toISOString().slice(0, 10),
-    due_date: new Date().toISOString().slice(0, 10),
+  const [store, setStore] = createStore({
+    assignments: [],
   });
 
-  // ID pakai temp- agar tidak dianggap integer oleh backend
-  const [dailyLogs, setDailyLogs] = createSignal([
-    {
-      id: `temp-${Math.random()}`,
-      category: CATEGORIES[0],
-      activity: "",
-      notes: "",
-      is_done: false,
-    },
-  ]);
+  // --- LOGIC AUTO STATUS ---
+  const calculateStatus = (logs = []) => {
+    if (logs.length === 0) return "TODO";
+    const doneCount = logs.filter((l) => l.is_done).length;
+    if (doneCount === 0) return "ON_HOLD";
+    if (doneCount === logs.length) return "DONE";
+    return "IN_PROGRESS";
+  };
 
-  const totalProgress = createMemo(() => {
-    const logs = dailyLogs();
-    if (!logs || logs.length === 0) return 0;
-    const doneCount = logs.filter(
-      (l) => l.is_done == true || l.is_done == 1 || l.is_done == "true",
-    ).length;
-    return Math.round((doneCount / logs.length) * 100);
-  });
+  const refreshWorks = async (assignmentIdx, taskId) => {
+    try {
+      const resWorks = await WorksService.getByTask(taskId);
+      const worksData = resWorks.data || [];
+      const mappedLogs = worksData.map((w) => ({
+        id: w.id,
+        category: w.division_pic || CATEGORIES[0],
+        activity: w.activity_name || "",
+        notes: w.notes || "",
+        is_done: w.status?.toLowerCase() === "done",
+      }));
+      setStore("assignments", assignmentIdx, "logs", mappedLogs);
+
+      // Update status task utama setelah logs di-refresh (karena jumlah/status logs berubah)
+      const task = store.assignments[assignmentIdx];
+      await syncTask(task);
+    } catch (err) {
+      console.error("Refresh Works Error:", err);
+    }
+  };
 
   onMount(async () => {
-    setIsLoading(true);
     try {
-      const resUsers = await UsersService.list();
-      setUsers(resUsers.data || []);
-
-      if (isEdit()) {
-        const resTask = await TasksService.getById(params.id);
-        const data = resTask.data || resTask;
-
-        setForm({
-          title: data.title,
-          assignee_id: data.assignee_id,
-          status: data.status,
-          priority: data.priority,
-          start_date: data.start_date?.slice(0, 10) || "",
-          due_date: data.due_date?.slice(0, 10) || "",
-        });
-
-        if (data.logs && data.logs.length > 0) {
-          setDailyLogs(
-            data.logs.map((log) => ({
-              id: log.id, // ID asli Number dari DB
-              category: log.category,
-              activity: log.activity,
-              notes: log.notes || "",
-              is_done: log.is_done == true || log.is_done == 1,
-            })),
-          );
-        }
-      }
+      const [resUsers, resProjects] = await Promise.all([
+        UsersService.list(),
+        ProjectsService.list(),
+      ]);
+      setUsers(resUsers.data || resUsers || []);
+      setProjects(resProjects.data || resProjects || []);
     } catch (err) {
-      console.error(err);
-    } finally {
-      setIsLoading(false);
+      console.error("Master Data Error:", err);
     }
   });
 
-  const updateLog = (id, field, val) => {
-    batch(() => {
-      setDailyLogs((prev) =>
-        prev.map((item) => {
-          if (item.id === id) {
-            if (field === "is_done") {
-              const current = Boolean(
-                item.is_done == true || item.is_done == 1,
-              );
-              return { ...item, is_done: !current };
-            }
-            return { ...item, [field]: val };
+  createEffect(
+    on(
+      () => params.id,
+      async (currentId) => {
+        if (!currentId) {
+          setStore("assignments", []);
+          return;
+        }
+
+        setIsLoading(true);
+        try {
+          const res = await ProjectsService.getById(currentId);
+          const resTask = await TasksService.list();
+          const projectData = res.data || res;
+          const allTasks = resTask.data || resTask || [];
+
+          if (!projectData) throw new Error("Project Not Found");
+          setProjectId(projectData.id.toString());
+
+          const filteredTasks = allTasks.filter(
+            (t) => t.project_id === parseInt(currentId),
+          );
+
+          if (filteredTasks.length > 0) {
+            const mappedTasks = await Promise.all(
+              filteredTasks.map(async (t) => {
+                const resWorks = await WorksService.getByTask(t.id);
+                const worksData = resWorks.data || [];
+
+                return {
+                  id: t.id,
+                  title: t.title || "",
+                  assignee_id: t.assignee_id ? t.assignee_id.toString() : "",
+                  priority: t.priority || "NORMAL",
+                  logs: worksData.map((w) => ({
+                    id: w.id,
+                    category: w.division_pic || CATEGORIES[0],
+                    activity: w.activity_name || "",
+                    notes: w.notes || "",
+                    is_done: w.status?.toLowerCase() === "done",
+                  })),
+                };
+              }),
+            );
+            setStore("assignments", mappedTasks);
           }
-          return item;
-        }),
-      );
-    });
+        } catch (err) {
+          console.error("Fetch Detail Error:", err);
+        } finally {
+          setIsLoading(false);
+        }
+      },
+    ),
+  );
+
+  const syncTask = async (task) => {
+    if (!projectId() || !task.title || !task.assignee_id) return;
+
+    const payload = {
+      project_id: parseInt(projectId()),
+      title: task.title,
+      priority: task.priority,
+      assignee_id: parseInt(task.assignee_id),
+      // Set status otomatis berdasarkan logs
+      status: calculateStatus(task.logs),
+    };
+
+    try {
+      if (typeof task.id === "number") {
+        await TasksService.update(task.id, payload);
+        // Kita tidak pake toast di sini biar gak nyepam pas checklist log
+      } else {
+        const res = await TasksService.create(payload);
+        const newId = res.data?.id || res.id;
+        const idx = store.assignments.findIndex((a) => a.id === task.id);
+        if (idx !== -1) setStore("assignments", idx, "id", newId);
+        toast("Task created");
+      }
+    } catch (err) {
+      toast("Sync task failed", "error");
+    }
   };
 
-  const addLog = () =>
-    setDailyLogs([
-      ...dailyLogs(),
+  const syncWork = async (task, log) => {
+    if (typeof task.id !== "number") return;
+    if (!log.activity || log.activity.trim() === "") return;
+
+    const payload = {
+      task_id: task.id,
+      activity_name: log.activity,
+      notes: log.notes || "",
+      division_pic: log.category || CATEGORIES[0],
+      status: log.is_done ? "Done" : "In Progress",
+    };
+
+    try {
+      if (typeof log.id === "number") {
+        await WorksService.update(log.id, payload);
+        toast("Activity updated");
+      } else {
+        const res = await WorksService.create(payload);
+        const newWorkId = res.data?.id || res.id;
+        const taskIdx = store.assignments.findIndex((a) => a.id === task.id);
+        if (taskIdx !== -1) {
+          const logIdx = store.assignments[taskIdx].logs.findIndex(
+            (l) => l.id === log.id,
+          );
+          if (logIdx !== -1)
+            setStore("assignments", taskIdx, "logs", logIdx, "id", newWorkId);
+        }
+        toast("Activity created");
+      }
+
+      // Setiap kali log berubah (create/update), sync status task utamanya
+      await syncTask(task);
+    } catch (err) {
+      toast("Sync activity failed", "error");
+    }
+  };
+
+  const addAssignment = () => {
+    setStore("assignments", (prev) => [
+      ...prev,
       {
-        id: `temp-${Math.random()}`,
+        id: `temp-task-${Date.now()}`,
+        title: "",
+        assignee_id: "",
+        priority: "NORMAL",
+        logs: [],
+      },
+    ]);
+  };
+
+  const addLog = (assignmentIdx) => {
+    setStore("assignments", assignmentIdx, "logs", (prev) => [
+      ...prev,
+      {
+        id: `temp-log-${Date.now()}`,
         category: CATEGORIES[0],
         activity: "",
         notes: "",
         is_done: false,
       },
     ]);
+  };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setIsSaving(true);
-
-    const finalLogs = dailyLogs().map((log) => {
-      const inputEl = logRefs[log.id];
-
-      // Susun objek log tanpa ID dulu
-      const logData = {
-        category: log.category,
-        activity: inputEl ? inputEl.value : log.activity,
-        notes: log.notes || "",
-        is_done: Boolean(log.is_done == true || log.is_done == 1),
-      };
-
-      // KUNCI: Hanya masukkan ID ke payload jika tipenya NUMBER (ID Database)
-      // ID string 'temp-xxx' akan dibuang sehingga backend membuat ID baru
-      if (typeof log.id === "number") {
-        logData.id = log.id;
-      }
-
-      return logData;
+  const removeAssignment = async (id, idx) => {
+    const confirm = await Swal.fire({
+      title: "Hapus Task?",
+      text: "Seluruh aktivitas di dalamnya akan hilang!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      background: "#0a0a0a",
+      color: "#fff",
     });
 
-    const currentForm = form();
-    const payload = {
-      title: currentForm.title,
-      assignee_id: parseInt(currentForm.assignee_id),
-      status: currentForm.status,
-      priority: currentForm.priority,
-      start_date: currentForm.start_date,
-      due_date: currentForm.due_date,
-      logs: finalLogs,
-    };
+    if (!confirm.isConfirmed) return;
 
-    try {
-      if (isEdit()) await TasksService.update(params.id, payload);
-      else await TasksService.create(payload);
+    if (typeof id === "number") {
+      try {
+        await TasksService.delete(id);
+        toast("Task deleted");
+      } catch (err) {
+        toast("Delete failed", "error");
+      }
+    }
+    setStore("assignments", (prev) => prev.filter((_, i) => i !== idx));
+  };
 
-      Swal.fire({
-        icon: "success",
-        title: "SYNCED",
-        background: "#0a0a0a",
-        color: "#fff",
-        timer: 1500,
-        showConfirmButton: false,
-      });
-      navigate("/main/task-list");
-    } catch (err) {
-      console.error(err);
-      Swal.fire({
-        icon: "error",
-        title: "Gagal Sync",
-        text: "Pastikan database sudah di-reset ke INT",
+  const removeLog = async (assignmentIdx, logId) => {
+    const task = store.assignments[assignmentIdx];
+
+    if (typeof logId === "number") {
+      const confirm = await Swal.fire({
+        title: "Hapus Aktivitas?",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonColor: "#ef4444",
         background: "#0a0a0a",
         color: "#fff",
       });
-    } finally {
-      setIsSaving(false);
+      if (!confirm.isConfirmed) return;
+
+      try {
+        await WorksService.delete(logId);
+        toast("Activity deleted");
+        if (task && typeof task.id === "number") {
+          await refreshWorks(assignmentIdx, task.id);
+        }
+      } catch (err) {
+        toast("Delete failed", "error");
+      }
+    } else {
+      setStore("assignments", assignmentIdx, "logs", (prev) =>
+        prev.filter((l) => l.id !== logId),
+      );
     }
   };
 
   return (
-    <div class="p-6 max-w-5xl mx-auto mb-20 text-white">
-      <style>{`
-        .section-in { animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) both; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-        select option { background: #1a1a1a; color: white; }
-      `}</style>
-
-      {/* HEADER */}
-      <div class="flex justify-between items-center mb-12 section-in">
-        <button
-          onClick={() => navigate(-1)}
-          class="flex items-center gap-3 text-gray-500 hover:text-white font-black transition-all"
-        >
-          <div class="p-2 bg-white/5 rounded-full">
-            <ChevronLeft size={20} />
-          </div>{" "}
-          BACK
-        </button>
-        <div class="text-right space-y-2">
-          <h2 class="text-3xl font-black tracking-tighter uppercase">
-            {isEdit() ? "Update Project" : "New Project"}
-          </h2>
-          <div class="flex items-center gap-4 justify-end">
-            <div class="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <div
-                class="h-full bg-blue-600 transition-all duration-1000"
-                style={{ width: `${totalProgress()}%` }}
-              ></div>
-            </div>
-            <span class="text-xs font-mono font-bold text-blue-400">
-              {totalProgress()}%
-            </span>
-          </div>
-        </div>
-      </div>
-
+    <div class="p-6 max-w-5xl mx-auto mb-20 text-white italic">
       <Show
         when={!isLoading()}
         fallback={
@@ -228,162 +302,249 @@ export default function TaskForm() {
           </div>
         }
       >
-        <form onSubmit={handleSubmit} class="space-y-8">
-          {/* BASIC INFO */}
-          <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[32px] border border-white/10 p-8 section-in">
-            <h3 class="text-[10px] font-black text-gray-600 uppercase tracking-[0.3em] mb-8">
-              Basic Info
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div class="md:col-span-2 space-y-2">
-                <label class="text-[10px] font-black text-gray-500 uppercase ml-2">
-                  Title
-                </label>
-                <input
-                  required
-                  type="text"
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 text-xl font-bold outline-none focus:border-blue-600 transition-all"
-                  value={form().title}
-                  onInput={(e) => setForm({ ...form(), title: e.target.value })}
-                />
-              </div>
-              <div class="space-y-2">
-                <label class="text-[10px] font-black text-gray-500 uppercase ml-2">
-                  Assignee
-                </label>
-                <select
-                  required
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 outline-none font-bold"
-                  value={form().assignee_id}
-                  onChange={(e) =>
-                    setForm({ ...form(), assignee_id: e.target.value })
-                  }
-                >
-                  <option value="">Pilih User</option>
-                  <For each={users()}>
-                    {(u) => <option value={u.id}>{u.name}</option>}
-                  </For>
-                </select>
-              </div>
-              <div class="space-y-2">
-                <label class="text-[10px] font-black text-gray-500 uppercase ml-2">
-                  Priority
-                </label>
-                <select
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 outline-none font-bold"
-                  value={form().priority}
-                  onChange={(e) =>
-                    setForm({ ...form(), priority: e.target.value })
-                  }
-                >
-                  <option value="NORMAL">NORMAL</option>
-                  <option value="HIGH">HIGH</option>
-                  <option value="URGENT">URGENT</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* WORK BREAKDOWN */}
-          <div
-            class="bg-gray-900/40 backdrop-blur-3xl rounded-[32px] border border-white/10 p-8 section-in"
-            style="animation-delay: 0.1s"
-          >
-            <div class="flex justify-between items-center mb-10">
-              <h3 class="text-[10px] font-black text-gray-600 uppercase tracking-[0.3em]">
-                Work Breakdown
+        <div class="space-y-10">
+          {/* मास्टर प्रोजेक्ट */}
+          <div class="bg-blue-600/10 rounded-[32px] border border-blue-500/20 p-8 shadow-2xl">
+            <div class="flex items-center gap-4 mb-6">
+              <Layers size={24} class="text-blue-500" />
+              <h3 class="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">
+                Master Project
               </h3>
-              <button
-                type="button"
-                onClick={addLog}
-                class="bg-white text-black px-6 py-2 rounded-xl text-[10px] font-black hover:scale-105 active:scale-95 transition-all"
-              >
-                + ADD TASK
-              </button>
             </div>
-            <div class="space-y-4">
-              <For each={dailyLogs()}>
-                {(log) => (
-                  <TaskItem
-                    log={log}
-                    setRef={(el) => (logRefs[log.id] = el)}
-                    updateLog={updateLog}
-                    onDelete={(id) =>
-                      setDailyLogs((prev) => prev.filter((l) => l.id !== id))
-                    }
-                  />
+            <select
+              class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-5 text-xl font-black outline-none text-white appearance-none cursor-pointer"
+              value={projectId()}
+              onChange={(e) => setProjectId(e.target.value)}
+            >
+              <option value="" class="bg-black text-gray-500 italic">
+                -- SELECT PROJECT --
+              </option>
+              <For each={projects()}>
+                {(p) => (
+                  <option value={p.id} class="bg-black text-white">
+                    {p.name}
+                  </option>
                 )}
               </For>
-            </div>
+            </select>
           </div>
 
-          <div
-            class="flex justify-end gap-6 section-in"
-            style="animation-delay: 0.2s"
-          >
+          <div class="flex justify-between items-center px-4">
+            <h3 class="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">
+              Live Assignments
+            </h3>
             <button
-              type="submit"
-              disabled={isSaving()}
-              class="bg-blue-600 px-12 py-5 rounded-[24px] font-black text-white shadow-2xl hover:scale-105 transition-all flex items-center gap-3"
+              onClick={addAssignment}
+              class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl text-[10px] font-black flex items-center gap-2 transition-all active:scale-95"
             >
-              <Show when={isSaving()} fallback={<Save size={20} />}>
-                <Loader2 size={20} class="animate-spin" />
-              </Show>
-              SYNC PROJECT
+              <Plus size={16} /> ADD NEW ASSIGNEE
             </button>
           </div>
-        </form>
+
+          <For each={store.assignments}>
+            {(assignment, assignmentIdx) => (
+              <div class="assignment-card bg-gray-900/40 border border-white/10 rounded-[40px] p-8 relative shadow-xl mb-6">
+                <div class="absolute top-0 left-0 w-1.5 h-full bg-blue-600"></div>
+
+                {/* STATUS BADGE */}
+                <div class="absolute top-4 right-20 flex gap-2">
+                  <span
+                    class={`text-[8px] font-black px-2 py-1 rounded border ${
+                      calculateStatus(assignment.logs) === "DONE"
+                        ? "border-green-500 text-green-500"
+                        : calculateStatus(assignment.logs) === "ON_HOLD"
+                          ? "border-orange-500 text-orange-500"
+                          : "border-blue-500 text-blue-500"
+                    }`}
+                  >
+                    {calculateStatus(assignment.logs)}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-6 mb-8">
+                  <div class="md:col-span-6 space-y-2">
+                    <label class="text-[10px] font-black text-gray-600 uppercase">
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 text-white"
+                      value={assignment.title}
+                      onInput={(e) =>
+                        setStore(
+                          "assignments",
+                          assignmentIdx(),
+                          "title",
+                          e.target.value,
+                        )
+                      }
+                      onBlur={() => syncTask(assignment)}
+                    />
+                  </div>
+                  <div class="md:col-span-3 space-y-2">
+                    <label class="text-[10px] font-black text-gray-600 uppercase">
+                      Assignee
+                    </label>
+                    <select
+                      class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm font-bold outline-none"
+                      value={assignment.assignee_id}
+                      onChange={(e) => {
+                        setStore(
+                          "assignments",
+                          assignmentIdx(),
+                          "assignee_id",
+                          e.target.value,
+                        );
+                        syncTask(assignment);
+                      }}
+                    >
+                      <option value="" class="bg-black">
+                        Select User
+                      </option>
+                      <For each={users()}>
+                        {(u) => (
+                          <option value={u.id} class="bg-black">
+                            {u.name}
+                          </option>
+                        )}
+                      </For>
+                    </select>
+                  </div>
+                  <div class="md:col-span-2 space-y-2">
+                    <label class="text-[10px] font-black text-gray-600 uppercase">
+                      Priority
+                    </label>
+                    <select
+                      class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm font-bold outline-none"
+                      value={assignment.priority}
+                      onChange={(e) => {
+                        setStore(
+                          "assignments",
+                          assignmentIdx(),
+                          "priority",
+                          e.target.value,
+                        );
+                        syncTask(assignment);
+                      }}
+                    >
+                      <option value="NORMAL" class="bg-black">
+                        NORMAL
+                      </option>
+                      <option value="HIGH" class="bg-black">
+                        HIGH
+                      </option>
+                      <option value="URGENT" class="bg-black">
+                        URGENT
+                      </option>
+                    </select>
+                  </div>
+                  <div class="md:col-span-1 flex items-end justify-end">
+                    <button
+                      onClick={() =>
+                        removeAssignment(assignment.id, assignmentIdx())
+                      }
+                      class="p-3 text-gray-700 hover:text-red-500 transition-all active:scale-75"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-black/20 rounded-[28px] p-6 border border-white/5">
+                  <div class="flex justify-between items-center mb-6">
+                    <h4 class="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                      Activities
+                      <span class="ml-2 text-blue-500 opacity-50">
+                        ({assignment.logs.filter((l) => l.is_done).length} /{" "}
+                        {assignment.logs.length})
+                      </span>
+                    </h4>
+                    <button
+                      onClick={() => addLog(assignmentIdx())}
+                      class="text-[10px] font-black text-blue-500 hover:text-blue-400 uppercase tracking-tighter"
+                    >
+                      + ADD ITEM
+                    </button>
+                  </div>
+
+                  <div class="space-y-4">
+                    <For each={assignment.logs}>
+                      {(log, logIdx) => (
+                        <div class="flex items-start gap-4 group/item">
+                          <button
+                            onClick={async () => {
+                              const newStatus = !log.is_done;
+                              setStore(
+                                "assignments",
+                                assignmentIdx(),
+                                "logs",
+                                logIdx(),
+                                "is_done",
+                                newStatus,
+                              );
+                              await syncWork(assignment, {
+                                ...log,
+                                is_done: newStatus,
+                              });
+                            }}
+                            class={`p-2.5 mt-1 rounded-xl transition-all ${log.is_done ? "bg-green-600 text-black shadow-lg shadow-green-600/20" : "bg-white/5 text-gray-600 hover:bg-white/10"}`}
+                          >
+                            <CheckCircle2 size={16} />
+                          </button>
+
+                          <div class="flex flex-col flex-1 gap-2">
+                            <input
+                              type="text"
+                              placeholder="Activity name..."
+                              class={`bg-transparent text-sm font-bold outline-none border-b border-white/5 focus:border-blue-500 transition-all ${log.is_done ? "text-green-500/50 line-through italic" : "text-white"}`}
+                              value={log.activity}
+                              onInput={(e) =>
+                                setStore(
+                                  "assignments",
+                                  assignmentIdx(),
+                                  "logs",
+                                  logIdx(),
+                                  "activity",
+                                  e.target.value,
+                                )
+                              }
+                              onBlur={() => syncWork(assignment, log)}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Live Notes..."
+                              class="bg-transparent text-[10px] text-gray-500 outline-none italic"
+                              value={log.notes || ""}
+                              onInput={(e) =>
+                                setStore(
+                                  "assignments",
+                                  assignmentIdx(),
+                                  "logs",
+                                  logIdx(),
+                                  "notes",
+                                  e.target.value,
+                                )
+                              }
+                              onBlur={() => syncWork(assignment, log)}
+                            />
+                          </div>
+
+                          <button
+                            onClick={() => removeLog(assignmentIdx(), log.id)}
+                            class="p-2 mt-1 text-gray-700 hover:text-red-500 transition-all opacity-0 group-hover/item:opacity-100 active:scale-75"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
       </Show>
-    </div>
-  );
-}
-
-function TaskItem(props) {
-  const isDone = () => props.log.is_done == true || props.log.is_done == 1;
-
-  return (
-    <div
-      class={`flex items-center gap-6 p-6 rounded-[28px] border transition-all duration-500 ${isDone() ? "bg-green-500/10 border-green-500/20" : "bg-white/5 border-white/5 grayscale-[0.8]"}`}
-    >
-      <button
-        type="button"
-        onClick={() => props.updateLog(props.log.id, "is_done")}
-        class={`p-4 rounded-2xl transition-all active:scale-90 ${isDone() ? "bg-green-600 text-black scale-110 shadow-lg" : "bg-white/5 text-gray-500 hover:text-white"}`}
-      >
-        <CheckCircle2 size={24} stroke-width={3} />
-      </button>
-
-      <div class="flex-1 space-y-1">
-        <select
-          class="bg-transparent text-[10px] font-black text-blue-500 uppercase outline-none"
-          value={props.log.category}
-          onChange={(e) =>
-            props.updateLog(props.log.id, "category", e.target.value)
-          }
-        >
-          {CATEGORIES.map((c) => (
-            <option value={c}>{c}</option>
-          ))}
-        </select>
-        <input
-          type="text"
-          placeholder="Activity name..."
-          class="w-full bg-transparent text-lg font-bold outline-none text-white placeholder:text-gray-700"
-          ref={props.setRef}
-          value={props.log.activity || ""}
-          onBlur={(e) =>
-            props.updateLog(props.log.id, "activity", e.currentTarget.value)
-          }
-        />
-      </div>
-
-      <button
-        type="button"
-        onClick={() => props.onDelete(props.log.id)}
-        class="p-2 text-gray-700 hover:text-red-500 transition-all hover:scale-110"
-      >
-        <Trash2 size={20} />
-      </button>
     </div>
   );
 }

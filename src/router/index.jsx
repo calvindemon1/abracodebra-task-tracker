@@ -3,12 +3,14 @@ import { isLoggedIn } from "../utils/auth";
 
 // Layouts & Pages
 import AuthLayout from "../layouts/AuthLayout";
-import DashboardLayout from "../layouts/DashboardLayout";
 import Login from "../pages/auth/Login";
+import Register from "../pages/auth/Register";
+import DashboardLayout from "../layouts/DashboardLayout";
 
 // Master Data Pages
-import Teams from "../pages/dashboard/master-data/Teams";
 import Users from "../pages/dashboard/master-data/Users";
+import Projects from "../pages/dashboard/master-data/Projects";
+import Teams from "../pages/dashboard/master-data/Teams";
 
 // Dashboard Pages
 import DashboardHome from "../pages/DashboardHome";
@@ -16,9 +18,6 @@ import TaskList from "../pages/dashboard/task/TaskList";
 import TaskForm from "../pages/dashboard/task/TaskForm";
 
 function ProtectedAdminLayout(props) {
-  // Debug: Cek di console apakah ini true/false saat login
-  console.log("Is Authenticated:", isLoggedIn());
-
   return isLoggedIn() ? (
     <DashboardLayout>{props.children}</DashboardLayout>
   ) : (
@@ -33,6 +32,7 @@ export default function AppRouter() {
       <Route path="/" component={AuthLayout}>
         <Route path="" component={Login} />
         <Route path="login" component={Login} />
+        <Route path="register" component={Register} />
       </Route>
 
       {/* Main Routes */}
@@ -40,8 +40,9 @@ export default function AppRouter() {
         <Route path="" component={DashboardHome} />
 
         {/* Master Data Pages */}
-        <Route path="/teams" component={Teams} />
         <Route path="/users" component={Users} />
+        <Route path="/projects" component={Projects} />
+        <Route path="/teams" component={Teams} />
 
         {/* Dashboard Pages */}
         <Route path="/task-list" component={TaskList} />

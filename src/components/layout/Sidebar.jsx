@@ -60,8 +60,9 @@ export default function Sidebar() {
       label: "Master Data",
       icon: Database,
       children: [
+        { label: "Users", path: "/main/users" },
+        { label: "Projects", path: "/main/projects" },
         { label: "Teams Division", path: "/main/teams" },
-        { label: "Users", path: "/main/users" }
       ],
     },
     {

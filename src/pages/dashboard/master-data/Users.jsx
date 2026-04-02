@@ -8,11 +8,13 @@ import {
   Save,
   X,
   ChevronLeft,
+  ChevronRight,
   User,
   Mail,
   ShieldCheck,
   Loader2,
   Users2,
+  Shield,
 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import Swal from "sweetalert2";
@@ -21,31 +23,46 @@ export default function Users() {
   const navigate = useNavigate();
   const [isMounted, setIsMounted] = createSignal(false);
 
+  // PAGINATION STATES
+  const [page, setPage] = createSignal(1);
+  const [perPage] = createSignal(10);
+
   // FETCH DATA
   const [users, { refetch }] = createResource(async () => {
     const res = await UsersService.list();
-    return res.data;
+    return res.data || res;
   });
 
   const [teams] = createResource(async () => {
     const res = await TeamsService.list();
-    return res.data;
+    return res.data || res;
   });
 
-  // FORM STATE
+  // FORM STATE - Kita simpan lowercase di state buat sinkron sama Dropdown UI
   const [form, setForm] = createSignal({
     name: "",
     email: "",
     password: "",
+    role: "member",
     team_id: "",
   });
+
   const [editingId, setEditingId] = createSignal(null);
   const [loading, setLoading] = createSignal(false);
+
+  // PAGINATION LOGIC
+  const paginatedUsers = () => {
+    const data = users() || [];
+    const start = (page() - 1) * perPage();
+    return data.slice(start, start + perPage());
+  };
+  const totalPages = () => Math.ceil((users()?.length || 0) / perPage());
 
   onMount(() => setTimeout(() => setIsMounted(true), 50));
 
   const submit = async (e) => {
     if (e) e.preventDefault();
+
     if (!form().name || !form().email || (!editingId() && !form().password)) {
       return Swal.fire({
         icon: "warning",
@@ -58,36 +75,50 @@ export default function Users() {
 
     setLoading(true);
     try {
-      const payload = { ...form(), team_id: parseInt(form().team_id) };
+      // REVISI LOGIC PAYLOAD: Kirim Role sebagai UPPERCASE ke API
+      const payload = {
+        ...form(),
+        role: form().role.toUpperCase(), // Paksa ke UPPERCASE sebelum kirim
+        team_id: parseInt(form().team_id),
+        ...(editingId() && !form().password && { password: undefined }),
+      };
+
       if (editingId()) {
         await UsersService.update(editingId(), payload);
         Swal.fire({
           icon: "success",
-          title: "UPDATED",
+          title: "USER UPDATED",
           background: "#0a0a0a",
           color: "#fff",
           timer: 1500,
           showConfirmButton: false,
         });
       } else {
-        await UsersService.register(payload);
+        await UsersService.create(payload);
         Swal.fire({
           icon: "success",
-          title: "CREATED",
+          title: "USER CREATED",
           background: "#0a0a0a",
           color: "#fff",
           timer: 1500,
           showConfirmButton: false,
         });
       }
-      setForm({ name: "", email: "", password: "", team_id: "" });
+
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        role: "member",
+        team_id: "",
+      });
       setEditingId(null);
       refetch();
     } catch (err) {
       Swal.fire({
         icon: "error",
         title: "FAILED",
-        text: "Email mungkin sudah terdaftar",
+        text: err.response?.data?.message || "Terjadi kesalahan",
         background: "#0a0a0a",
         color: "#fff",
       });
@@ -101,6 +132,7 @@ export default function Users() {
     setForm({
       name: user.name,
       email: user.email,
+      role: user.role.toLowerCase(), // Simpan lowercase di state UI
       team_id: user.team_id,
       password: "",
     });
@@ -110,7 +142,6 @@ export default function Users() {
   const remove = async (id) => {
     const confirm = await Swal.fire({
       title: "HAPUS USER?",
-      text: "User ini bakal kehilangan akses login!",
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#ef4444",
@@ -122,14 +153,6 @@ export default function Users() {
       try {
         await UsersService.delete(id);
         refetch();
-        Swal.fire({
-          icon: "success",
-          title: "DELETED",
-          background: "#0a0a0a",
-          color: "#fff",
-          timer: 1000,
-          showConfirmButton: false,
-        });
       } catch (err) {
         Swal.fire({
           icon: "error",
@@ -142,7 +165,7 @@ export default function Users() {
   };
 
   return (
-    <div class="p-6 min-h-screen text-white overflow-hidden">
+    <div class="p-6 min-h-screen text-white overflow-hidden font-sans">
       <style>{`
         .page-enter { animation: pageIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes pageIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -151,7 +174,7 @@ export default function Users() {
       `}</style>
 
       <div
-        class={`max-w-6xl mx-auto space-y-10 ${isMounted() ? "page-enter" : "opacity-0"}`}
+        class={`max-w-7xl mx-auto space-y-10 ${isMounted() ? "page-enter" : "opacity-0"}`}
       >
         {/* HEADER */}
         <div class="flex justify-between items-end">
@@ -179,38 +202,38 @@ export default function Users() {
         {/* FORM SECTION */}
         <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 p-10 shadow-2xl">
           <form onSubmit={submit} class="space-y-8">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
-                  Full Name
+                  Name
                 </label>
                 <input
                   type="text"
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all"
+                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all text-white"
                   value={form().name}
                   onInput={(e) => setForm({ ...form(), name: e.target.value })}
-                  placeholder="Calvin..."
+                  placeholder="Budi..."
                 />
               </div>
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
-                  Email Address
+                  Email
                 </label>
                 <input
                   type="email"
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all"
+                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all text-white"
                   value={form().email}
                   onInput={(e) => setForm({ ...form(), email: e.target.value })}
-                  placeholder="calvin@mail.com"
+                  placeholder="budi@gmail.com"
                 />
               </div>
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
-                  {editingId() ? "New Password (Optional)" : "Password"}
+                  {editingId() ? "New Pass (Opt)" : "Password"}
                 </label>
                 <input
                   type="password"
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all"
+                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all text-white"
                   value={form().password}
                   onInput={(e) =>
                     setForm({ ...form(), password: e.target.value })
@@ -220,19 +243,36 @@ export default function Users() {
               </div>
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
-                  Assign Team
+                  Role
                 </label>
                 <select
-                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all cursor-pointer"
+                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all cursor-pointer text-white appearance-none"
+                  style="color-scheme: dark"
+                  value={form().role}
+                  onChange={(e) => setForm({ ...form(), role: e.target.value })}
+                >
+                  <option value="admin">admin</option>
+                  <option value="member">member</option>
+                  <option value="user">user</option>
+                </select>
+              </div>
+              <div class="space-y-2">
+                <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
+                  Team
+                </label>
+                <select
+                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all cursor-pointer text-white appearance-none"
                   style="color-scheme: dark"
                   value={form().team_id}
                   onChange={(e) =>
                     setForm({ ...form(), team_id: e.target.value })
                   }
                 >
-                  <option value="">Select Team</option>
+                  <option value="">No Team</option>
                   <For each={teams()}>
-                    {(t) => <option value={t.id}>{t.team_name}</option>}
+                    {(t) => (
+                      <option value={t.id}>{t.name || t.team_name}</option>
+                    )}
                   </For>
                 </select>
               </div>
@@ -244,7 +284,13 @@ export default function Users() {
                   type="button"
                   onClick={() => {
                     setEditingId(null);
-                    setForm({ name: "", email: "", password: "", team_id: "" });
+                    setForm({
+                      name: "",
+                      email: "",
+                      password: "",
+                      role: "member",
+                      team_id: "",
+                    });
                   }}
                   class="px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-white/5 text-gray-400 hover:text-white transition-all"
                 >
@@ -271,12 +317,12 @@ export default function Users() {
         </div>
 
         {/* TABLE SECTION */}
-        <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 overflow-hidden shadow-2xl">
+        <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 overflow-hidden shadow-2xl flex flex-col">
           <table class="w-full text-left">
             <thead class="bg-white/5 text-[10px] uppercase font-black tracking-[0.3em] text-gray-500 border-b border-white/5">
               <tr>
-                <th class="p-8">Identity</th>
-                <th class="p-8">Team</th>
+                <th class="p-8">Identity & Role</th>
+                <th class="p-8">Team Assignment</th>
                 <th class="p-8 text-right">Actions</th>
               </tr>
             </thead>
@@ -287,14 +333,14 @@ export default function Users() {
                   <tr>
                     <td
                       colspan="3"
-                      class="p-20 text-center opacity-30 font-black tracking-widest"
+                      class="p-20 text-center opacity-30 font-black tracking-widest italic"
                     >
-                      LOADING USERS...
+                      LOADING USERS HUB...
                     </td>
                   </tr>
                 }
               >
-                <For each={users()}>
+                <For each={paginatedUsers()}>
                   {(user, i) => (
                     <tr
                       class="row-item group hover:bg-white/[0.03] transition-all duration-500"
@@ -302,18 +348,31 @@ export default function Users() {
                     >
                       <td class="p-8">
                         <div class="flex items-center gap-4">
-                          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center border border-white/5 group-hover:border-blue-500/50 transition-all">
+                          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center border border-white/5 group-hover:border-blue-500/50 transition-all relative">
                             <User
                               size={20}
                               class="text-gray-500 group-hover:text-blue-400"
                             />
+                            {/* Pengecekan visual tetap lowercase supaya sinkron sama GET API */}
+                            <Show when={user.role?.toLowerCase() === "admin"}>
+                              <div class="absolute -top-2 -right-2 bg-blue-600 rounded-full p-1 border-2 border-black">
+                                <Shield size={10} />
+                              </div>
+                            </Show>
                           </div>
                           <div>
-                            <div class="text-lg font-black tracking-tight group-hover:text-blue-400 transition-colors uppercase">
+                            <div class="text-lg font-black tracking-tight group-hover:text-blue-400 transition-colors uppercase italic">
                               {user.name}
                             </div>
-                            <div class="text-xs text-gray-500 font-mono tracking-tighter">
-                              {user.email}
+                            <div class="flex items-center gap-2 mt-1">
+                              <span
+                                class={`text-[8px] font-black px-2 py-0.5 rounded border ${user.role?.toLowerCase() === "admin" ? "border-blue-500/50 text-blue-400" : "border-gray-500/50 text-gray-500"}`}
+                              >
+                                {user.role}
+                              </span>
+                              <span class="text-[10px] text-gray-600 font-mono italic">
+                                {user.email}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -322,13 +381,15 @@ export default function Users() {
                         <div class="flex items-center gap-2 bg-white/5 w-fit px-4 py-1.5 rounded-full border border-white/5">
                           <Users2 size={12} class="text-indigo-400" />
                           <span class="text-[10px] font-black uppercase tracking-widest text-indigo-300">
-                            {teams()?.find((t) => t.id === user.team_id)
-                              ?.team_name || "No Team"}
+                            {teams()?.find((t) => t.id == user.team_id)?.name ||
+                              teams()?.find((t) => t.id == user.team_id)
+                                ?.team_name ||
+                              "Unassigned"}
                           </span>
                         </div>
                       </td>
-                      <td class="p-8">
-                        <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                      <td class="p-8 text-right">
+                        <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0">
                           <button
                             onClick={() => startEdit(user)}
                             class="p-4 bg-white/5 hover:bg-blue-600 rounded-2xl text-gray-400 hover:text-white transition-all shadow-xl"
@@ -349,6 +410,29 @@ export default function Users() {
               </Show>
             </tbody>
           </table>
+
+          {/* PAGINATION FOOTER */}
+          <div class="p-6 bg-white/[0.02] border-t border-white/5 flex items-center justify-between">
+            <div class="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+              Showing page {page()} of {totalPages() || 1}
+            </div>
+            <div class="flex gap-4">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page() === 1}
+                class="p-4 rounded-2xl bg-white/5 hover:bg-white/10 disabled:opacity-10 transition-all text-gray-400 hover:text-white"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages(), p + 1))}
+                disabled={page() >= totalPages()}
+                class="p-4 rounded-2xl bg-white/5 hover:bg-white/10 disabled:opacity-10 transition-all text-gray-400 hover:text-white"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
