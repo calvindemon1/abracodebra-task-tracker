@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [devtools(), solidPlugin(), tailwindcss()],
   server: {
     port: 3131,
+    host: "0.0.0.0",
   },
   build: {
     target: "esnext",
