@@ -1,7 +1,7 @@
 import { getToken } from "../utils/auth";
 
-// const BASE_URL = "https://cloud-projecthub.abracodebra.site";
-const BASE_URL = "http://192.168.0.119:3888";
+const BASE_URL = "https://cloud-projecthub.abracodebra.site";
+// const BASE_URL = "http://192.168.0.119:3888";
 
 async function request(endpoint, options = {}) {
   const token = getToken();
