@@ -8,6 +8,7 @@ import {
   Layers,
   Plus,
   ChevronDown,
+  GripVertical,
 } from "lucide-solid";
 import Swal from "sweetalert2";
 import { TasksService } from "../../../services/tasks";
@@ -49,7 +50,9 @@ export default function TaskForm() {
     assignments: [],
   });
 
-  // --- LOGIC AUTO STATUS ---
+  const [draggedLog, setDraggedLog] = createSignal(null);
+  const [dragOverLog, setDragOverLog] = createSignal(null);
+
   const calculateStatus = (logs = []) => {
     if (logs.length === 0) return "TODO";
     const doneCount = logs.filter((l) => l.is_done).length;
@@ -71,7 +74,6 @@ export default function TaskForm() {
       }));
       setStore("assignments", assignmentIdx, "logs", mappedLogs);
 
-      // Update status task utama setelah logs di-refresh (karena jumlah/status logs berubah)
       const task = store.assignments[assignmentIdx];
       await syncTask(task);
     } catch (err) {
@@ -121,18 +123,24 @@ export default function TaskForm() {
                 const resWorks = await WorksService.getByTask(t.id);
                 const worksData = resWorks.data || [];
 
+                let logs = worksData.map((w) => ({
+                  id: w.id,
+                  category: w.division_pic || CATEGORIES[0],
+                  activity: w.activity_name || "",
+                  notes: w.notes || "",
+                  is_done: w.status?.toLowerCase() === "done",
+                }));
+
+                logs.sort((a, b) =>
+                  a.is_done === b.is_done ? 0 : a.is_done ? 1 : -1,
+                );
+
                 return {
                   id: t.id,
                   title: t.title || "",
                   assignee_id: t.assignee_id ? t.assignee_id.toString() : "",
                   priority: t.priority || "NORMAL",
-                  logs: worksData.map((w) => ({
-                    id: w.id,
-                    category: w.division_pic || CATEGORIES[0],
-                    activity: w.activity_name || "",
-                    notes: w.notes || "",
-                    is_done: w.status?.toLowerCase() === "done",
-                  })),
+                  logs: logs,
                 };
               }),
             );
@@ -155,14 +163,12 @@ export default function TaskForm() {
       title: task.title,
       priority: task.priority,
       assignee_id: parseInt(task.assignee_id),
-      // Set status otomatis berdasarkan logs
       status: calculateStatus(task.logs),
     };
 
     try {
       if (typeof task.id === "number") {
         await TasksService.update(task.id, payload);
-        // Kita tidak pake toast di sini biar gak nyepam pas checklist log
       } else {
         const res = await TasksService.create(payload);
         const newId = res.data?.id || res.id;
@@ -204,12 +210,51 @@ export default function TaskForm() {
         }
         toast("Activity created");
       }
-
-      // Setiap kali log berubah (create/update), sync status task utamanya
       await syncTask(task);
     } catch (err) {
       toast("Sync activity failed", "error");
     }
+  };
+
+  const handleDragStart = (e, assignIdx, logIdx) => {
+    setDraggedLog({ assignIdx, logIdx });
+    e.dataTransfer.effectAllowed = "move";
+    setTimeout(() => {
+      e.target.style.opacity = "0.5";
+    }, 0);
+  };
+
+  const handleDragEnd = (e) => {
+    e.target.style.opacity = "1";
+    setDraggedLog(null);
+    setDragOverLog(null);
+  };
+
+  const handleDragOver = (e, assignIdx, logIdx) => {
+    e.preventDefault();
+    setDragOverLog(`${assignIdx}-${logIdx}`);
+  };
+
+  const handleDrop = (e, targetAssignIdx, targetLogIdx) => {
+    e.preventDefault();
+    const dragged = draggedLog();
+    if (!dragged) return;
+
+    if (dragged.assignIdx !== targetAssignIdx) {
+      toast("Tidak bisa pindah ke Task lain", "warning");
+      return;
+    }
+
+    if (dragged.logIdx !== targetLogIdx) {
+      const logs = [...store.assignments[targetAssignIdx].logs];
+      const [movedItem] = logs.splice(dragged.logIdx, 1);
+      logs.splice(targetLogIdx, 0, movedItem);
+
+      setStore("assignments", targetAssignIdx, "logs", logs);
+    }
+
+    setDraggedLog(null);
+    setDragOverLog(null);
   };
 
   const addAssignment = () => {
@@ -303,7 +348,6 @@ export default function TaskForm() {
         }
       >
         <div class="space-y-10">
-          {/* मास्टर प्रोजेक्ट */}
           <div class="bg-blue-600/10 rounded-[32px] border border-blue-500/20 p-8 shadow-2xl">
             <div class="flex items-center gap-4 mb-6">
               <Layers size={24} class="text-blue-500" />
@@ -346,7 +390,6 @@ export default function TaskForm() {
               <div class="assignment-card bg-gray-900/40 border border-white/10 rounded-[40px] p-8 relative shadow-xl mb-6">
                 <div class="absolute top-0 left-0 w-1.5 h-full bg-blue-600"></div>
 
-                {/* STATUS BADGE */}
                 <div class="absolute top-4 right-20 flex gap-2">
                   <span
                     class={`text-[8px] font-black px-2 py-1 rounded border ${
@@ -470,18 +513,59 @@ export default function TaskForm() {
                   <div class="space-y-4">
                     <For each={assignment.logs}>
                       {(log, logIdx) => (
-                        <div class="flex items-start gap-4 group/item">
+                        <div
+                          draggable={true}
+                          onDragStart={(e) =>
+                            handleDragStart(e, assignmentIdx(), logIdx())
+                          }
+                          onDragOver={(e) =>
+                            handleDragOver(e, assignmentIdx(), logIdx())
+                          }
+                          onDrop={(e) =>
+                            handleDrop(e, assignmentIdx(), logIdx())
+                          }
+                          onDragEnd={handleDragEnd}
+                          onDragLeave={() => setDragOverLog(null)}
+                          class={`flex items-start gap-4 group/item p-2 rounded-2xl transition-all cursor-move border border-transparent ${
+                            dragOverLog() === `${assignmentIdx()}-${logIdx()}`
+                              ? "border-blue-500/50 bg-white/5"
+                              : "hover:bg-white/5"
+                          }`}
+                        >
+                          <div class="mt-2.5 text-gray-600 opacity-50 group-hover/item:opacity-100 cursor-grab active:cursor-grabbing">
+                            <GripVertical size={16} />
+                          </div>
+
                           <button
                             onClick={async () => {
                               const newStatus = !log.is_done;
+
+                              // --- LOGIC BARU: CABUT ITEM LALU PINDAH POSISI ---
+                              const currentLogs = [
+                                ...store.assignments[assignmentIdx()].logs,
+                              ];
+                              // Cabut item dari posisinya saat ini, dan ubah is_done nya
+                              const toggledItem = {
+                                ...currentLogs[logIdx()],
+                                is_done: newStatus,
+                              };
+                              currentLogs.splice(logIdx(), 1);
+
+                              // Kalau di-ceklis (Done), push ke posisi paling bawah array
+                              if (newStatus) {
+                                currentLogs.push(toggledItem);
+                              } else {
+                                // Kalau un-ceklis (In Progress), masukin ke posisi paling atas array
+                                currentLogs.unshift(toggledItem);
+                              }
+
                               setStore(
                                 "assignments",
                                 assignmentIdx(),
                                 "logs",
-                                logIdx(),
-                                "is_done",
-                                newStatus,
+                                currentLogs,
                               );
+
                               await syncWork(assignment, {
                                 ...log,
                                 is_done: newStatus,
