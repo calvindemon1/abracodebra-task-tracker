@@ -126,6 +126,32 @@ export default function DashboardHome() {
     });
   };
 
+  const isWithinTimeframe = (dateStr, timeframe) => {
+    if (!dateStr) return true; // Jika task ga ada tanggalnya, anggap lolos/tampilkan saja
+    const taskDate = new Date(dateStr);
+    const now = new Date();
+
+    // Reset jam ke 00:00:00 buat perbandingan hari yang akurat
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).getTime();
+
+    if (timeframe === "day") {
+      return taskDate.getTime() >= startOfToday;
+    }
+    if (timeframe === "week") {
+      const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+      return taskDate.getTime() >= sevenDaysAgo;
+    }
+    if (timeframe === "month") {
+      const thirtyDaysAgo = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+      return taskDate.getTime() >= thirtyDaysAgo;
+    }
+    return true;
+  };
+
   // ===== DATA PROCESSOR (SINKRON SEMUA KOMPONEN) =====
   const analyticsData = createMemo(() => {
     const allTasks = tasks() || [];
@@ -134,7 +160,7 @@ export default function DashboardHome() {
     const mergedMap = new Map();
 
     allUsers.forEach((user) => {
-      // Filter berdasarkan Team & Member dropdown
+      // Filter berdasarkan Team & Member dropdown (Logic lu yang udah ada)
       if (
         selectedTeamId() !== "All" &&
         Number(user.team_id) !== Number(selectedTeamId())
@@ -147,9 +173,14 @@ export default function DashboardHome() {
         return;
 
       const cleanName = user.name.split(" (")[0].trim();
-      const userTasks = allTasks.filter(
-        (t) => Number(t.assignee_id) === Number(user.id),
-      );
+
+      // --- PERBAIKAN DI SINI: Tambah Filter Timeframe ---
+      const userTasks = allTasks.filter((t) => {
+        const isOwner = Number(t.assignee_id) === Number(user.id);
+        // Kita pake t.start_date sebagai patokan karena createdAt ga ada di skema lu
+        const isInTime = isWithinTimeframe(t.start_date, stressTimeframe());
+        return isOwner && isInTime;
+      });
 
       let doneTasks = 0;
       let ongoingTasks = 0;
@@ -192,6 +223,7 @@ export default function DashboardHome() {
       .map((item) => ({
         ...item,
         percentage: (item.ongoingTasks / STRESS_THRESHOLD) * 100,
+        // Warna & Level tetap dinamis berdasarkan ongoing yang terfilter
         color:
           item.ongoingTasks > 10
             ? "#ef4444"
