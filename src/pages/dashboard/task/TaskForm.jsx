@@ -272,7 +272,7 @@ export default function TaskForm() {
 
   const addLog = (assignmentIdx) => {
     setStore("assignments", assignmentIdx, "logs", (prev) => [
-      ...prev,
+      // --- FIX: Item baru dimasukin di awal array biar nongol paling atas ---
       {
         id: `temp-log-${Date.now()}`,
         category: CATEGORIES[0],
@@ -280,6 +280,7 @@ export default function TaskForm() {
         notes: "",
         is_done: false,
       },
+      ...prev,
     ]);
   };
 
