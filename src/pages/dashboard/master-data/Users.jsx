@@ -6,12 +6,9 @@ import {
   Trash2,
   UserPlus,
   Save,
-  X,
   ChevronLeft,
   ChevronRight,
   User,
-  Mail,
-  ShieldCheck,
   Loader2,
   Users2,
   Shield,
@@ -30,6 +27,7 @@ export default function Users() {
   // FETCH DATA
   const [users, { refetch }] = createResource(async () => {
     const res = await UsersService.list();
+    console.log("Fetched users:", res); // Debug log untuk memastikan data diterima
     return res.data || res;
   });
 
@@ -38,9 +36,10 @@ export default function Users() {
     return res.data || res;
   });
 
-  // FORM STATE - Kita simpan lowercase di state buat sinkron sama Dropdown UI
+  // FORM STATE - Tambah username
   const [form, setForm] = createSignal({
     name: "",
+    username: "", // <-- TAMBAHAN BARU
     email: "",
     password: "",
     role: "member",
@@ -63,11 +62,17 @@ export default function Users() {
   const submit = async (e) => {
     if (e) e.preventDefault();
 
-    if (!form().name || !form().email || (!editingId() && !form().password)) {
+    // VALIDASI - Tambah cek username
+    if (
+      !form().name ||
+      !form().username ||
+      !form().email ||
+      (!editingId() && !form().password)
+    ) {
       return Swal.fire({
         icon: "warning",
         title: "INPUT KURANG",
-        text: "Nama, Email, dan Password wajib diisi!",
+        text: "Nama, Username, Email, dan Password wajib diisi!",
         background: "#0a0a0a",
         color: "#fff",
       });
@@ -75,10 +80,9 @@ export default function Users() {
 
     setLoading(true);
     try {
-      // REVISI LOGIC PAYLOAD: Kirim Role sebagai UPPERCASE ke API
       const payload = {
         ...form(),
-        role: form().role.toUpperCase(), // Paksa ke UPPERCASE sebelum kirim
+        role: form().role.toUpperCase(),
         team_id: parseInt(form().team_id),
         ...(editingId() && !form().password && { password: undefined }),
       };
@@ -105,8 +109,10 @@ export default function Users() {
         });
       }
 
+      // RESET FORM - Reset username juga
       setForm({
         name: "",
+        username: "",
         email: "",
         password: "",
         role: "member",
@@ -129,11 +135,13 @@ export default function Users() {
 
   const startEdit = (user) => {
     setEditingId(user.id);
+    // Masukkan data username ke state
     setForm({
-      name: user.name,
-      email: user.email,
-      role: user.role.toLowerCase(), // Simpan lowercase di state UI
-      team_id: user.team_id,
+      name: user.name || "",
+      username: user.username || "",
+      email: user.email || "",
+      role: user.role ? user.role.toLowerCase() : "member",
+      team_id: user.team_id || "",
       password: "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -202,7 +210,8 @@ export default function Users() {
         {/* FORM SECTION */}
         <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 p-10 shadow-2xl">
           <form onSubmit={submit} class="space-y-8">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+            {/* GRID DIUBAH JADI xl:grid-cols-3 BIAR RAPI 2 BARIS X 3 KOLOM */}
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
                   Name
@@ -212,9 +221,26 @@ export default function Users() {
                   class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all text-white"
                   value={form().name}
                   onInput={(e) => setForm({ ...form(), name: e.target.value })}
-                  placeholder="Budi..."
+                  placeholder="Nama Lengkap..."
                 />
               </div>
+
+              {/* INPUT USERNAME BARU */}
+              <div class="space-y-2">
+                <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all text-white"
+                  value={form().username}
+                  onInput={(e) =>
+                    setForm({ ...form(), username: e.target.value })
+                  }
+                  placeholder="Username..."
+                />
+              </div>
+
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
                   Email
@@ -224,9 +250,10 @@ export default function Users() {
                   class="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 text-sm font-bold outline-none focus:border-blue-500 transition-all text-white"
                   value={form().email}
                   onInput={(e) => setForm({ ...form(), email: e.target.value })}
-                  placeholder="budi@gmail.com"
+                  placeholder="user@email.com"
                 />
               </div>
+
               <div class="space-y-2">
                 <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-2">
                   {editingId() ? "New Pass (Opt)" : "Password"}
@@ -286,6 +313,7 @@ export default function Users() {
                     setEditingId(null);
                     setForm({
                       name: "",
+                      username: "", // RESET USERNAME JUGA
                       email: "",
                       password: "",
                       role: "member",
@@ -353,7 +381,6 @@ export default function Users() {
                               size={20}
                               class="text-gray-500 group-hover:text-blue-400"
                             />
-                            {/* Pengecekan visual tetap lowercase supaya sinkron sama GET API */}
                             <Show when={user.role?.toLowerCase() === "admin"}>
                               <div class="absolute -top-2 -right-2 bg-blue-600 rounded-full p-1 border-2 border-black">
                                 <Shield size={10} />
@@ -361,8 +388,14 @@ export default function Users() {
                             </Show>
                           </div>
                           <div>
-                            <div class="text-lg font-black tracking-tight group-hover:text-blue-400 transition-colors uppercase italic">
+                            <div class="text-lg font-black tracking-tight group-hover:text-blue-400 transition-colors uppercase italic flex items-center gap-3">
                               {user.name}
+                              {/* MENAMPILKAN USERNAME DI SEBELAH NAMA */}
+                              <Show when={user.username}>
+                                <span class="text-[10px] font-mono text-gray-500 lowercase bg-white/5 px-2 py-0.5 rounded-md border border-white/5 not-italic">
+                                  @{user.username}
+                                </span>
+                              </Show>
                             </div>
                             <div class="flex items-center gap-2 mt-1">
                               <span
