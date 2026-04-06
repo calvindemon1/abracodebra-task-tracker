@@ -1,5 +1,5 @@
-import { useNavigate, useLocation, A } from "@solidjs/router"; // Tambah A di sini
-import { createSignal, createEffect, For, Show, on } from "solid-js";
+import { useNavigate, useLocation, A } from "@solidjs/router";
+import { createSignal, createEffect, For, Show, batch } from "solid-js";
 import {
   Boxes,
   Database,
@@ -29,7 +29,6 @@ export default function Sidebar() {
 
   const isOpen = (key) => openKeys().includes(key);
 
-  // Kunci perbaikan 1: Logic active yang lebih solid
   const checkActive = (path) => {
     if (!path) return false;
     const current = location.pathname;
@@ -37,7 +36,6 @@ export default function Sidebar() {
     return current === path || current.startsWith(`${path}/`);
   };
 
-  // Kunci perbaikan 2: Cek group active secara rekursif
   const isGroupActive = (item) => {
     if (item.children) {
       return item.children.some((child) => {
@@ -73,7 +71,6 @@ export default function Sidebar() {
     },
   ];
 
-  // Auto-expand menu saat pindah page
   createEffect(() => {
     const currentPath = location.pathname;
     menus.forEach((item) => {
@@ -91,8 +88,6 @@ export default function Sidebar() {
         {(item) => {
           const hasChildren = !!item.children;
           const Icon = item.icon;
-
-          // Kita bungkus pengecekan active di dalam function/memo agar reaktif
           const active = () =>
             hasChildren ? isGroupActive(item) : checkActive(item.path);
 
@@ -100,7 +95,14 @@ export default function Sidebar() {
             return (
               <div class="mb-2">
                 <button
-                  onClick={() => toggleMenu(item.key)}
+                  onClick={() => {
+                    if (collapsed()) {
+                      // REVISI KUNCI: Navigasi ke anak pertama, TAPI JANGAN buka sidebar
+                      navigate(item.children[0].path);
+                    } else {
+                      toggleMenu(item.key);
+                    }
+                  }}
                   class={`w-full flex items-center ${collapsed() ? "justify-center" : "justify-between"} 
                   p-3 rounded-2xl transition-all duration-300 group relative
                   ${active() ? "text-white bg-white/5 shadow-[inset_0_0_12px_rgba(255,255,255,0.02)]" : "text-gray-500 hover:text-gray-200"}`}
@@ -201,19 +203,19 @@ export default function Sidebar() {
           <Show
             when={!collapsed()}
             fallback={
-              <button
-                onClick={() => setCollapsed(false)}
-                class="group relative w-full h-12 bg-white/5 hover:bg-blue-600/10 rounded-full flex flex-col items-center justify-center transition-all duration-500 overflow-hidden shadow-2xl border border-white/5 active:scale-95"
-              >
+              <div class="w-full h-12 flex items-center justify-center relative group">
                 <img
                   src={logoGramAbra}
-                  class="w-8 h-8 object-contain transition-all duration-500 group-hover:scale-0 group-hover:opacity-0"
+                  class="w-8 h-8 object-contain transition-all duration-500"
                   alt="Logo"
                 />
-                <div class="absolute inset-0 flex items-center justify-center translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-500 text-blue-500">
-                  <ChevronRight size={24} stroke-width={3} />
-                </div>
-              </button>
+                <button
+                  onClick={() => setCollapsed(false)}
+                  class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-blue-600/20 rounded-full transition-all duration-500 text-blue-500"
+                >
+                  <ChevronRight size={20} stroke-width={3} />
+                </button>
+              </div>
             }
           >
             <div class="flex items-center justify-between w-full pr-2">
