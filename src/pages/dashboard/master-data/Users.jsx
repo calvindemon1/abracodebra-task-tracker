@@ -62,12 +62,15 @@ export default function Users() {
   const submit = async (e) => {
     if (e) e.preventDefault();
 
-    // VALIDASI - Tambah cek username
+    const currentForm = form();
+    const id = editingId();
+
+    // 1. VALIDASI INPUT WAJIB
     if (
-      !form().name ||
-      !form().username ||
-      !form().email ||
-      (!editingId() && !form().password)
+      !currentForm.name ||
+      !currentForm.username ||
+      !currentForm.email ||
+      (!id && !currentForm.password)
     ) {
       return Swal.fire({
         icon: "warning",
@@ -80,36 +83,71 @@ export default function Users() {
 
     setLoading(true);
     try {
+      // 2. AMBIL DATA ASLI (Untuk Update)
+      const originalUser = id ? users()?.find((u) => u.id === id) : null;
+
+      // 3. SUSUN PAYLOAD
       const payload = {
-        ...form(),
-        role: form().role.toUpperCase(),
-        team_id: parseInt(form().team_id),
-        ...(editingId() && !form().password && { password: undefined }),
+        name: currentForm.name,
+        username: currentForm.username,
+        email: currentForm.email,
+        role: currentForm.role.toLowerCase(),
+        team_id: currentForm.team_id ? parseInt(currentForm.team_id) : null,
       };
 
-      if (editingId()) {
-        await UsersService.update(editingId(), payload);
-        Swal.fire({
-          icon: "success",
-          title: "USER UPDATED",
-          background: "#0a0a0a",
-          color: "#fff",
-          timer: 1500,
-          showConfirmButton: false,
-        });
+      if (id) {
+        // --- LOGIC UNTUK UPDATE ---
+
+        // Cek apakah password di form diisi (user mau ganti password)
+        const isPasswordInputFilled =
+          currentForm.password && currentForm.password.trim() !== "";
+
+        if (isPasswordInputFilled) {
+          // Jika user ngetik password baru, kirim password baru (Plaintext)
+          payload.password = currentForm.password;
+        } else {
+          // Jika form kosong, KIRIM PASSWORD LAMA (yang udah ter-encrypt dari DB)
+          // Ini supaya validasi @prisma/client (Required) terpenuhi
+          payload.password = originalUser.password;
+        }
+
+        // Cek Perubahan (Biar ga kena "No changes detected")
+        const isDataChanged =
+          payload.name !== originalUser.name ||
+          payload.username !== originalUser.username ||
+          payload.email !== originalUser.email ||
+          payload.role !== originalUser.role?.toLowerCase() ||
+          payload.team_id !== (originalUser.team_id || null) ||
+          isPasswordInputFilled; // Dianggap berubah kalau user ngetik password baru
+
+        if (!isDataChanged) {
+          setLoading(false);
+          return Swal.fire({
+            icon: "info",
+            title: "NO CHANGES",
+            text: "Data masih sama persis bro.",
+            background: "#0a0a0a",
+            color: "#fff",
+          });
+        }
+
+        await UsersService.update(id, payload);
       } else {
+        // --- LOGIC UNTUK CREATE ---
+        payload.password = currentForm.password;
         await UsersService.create(payload);
-        Swal.fire({
-          icon: "success",
-          title: "USER CREATED",
-          background: "#0a0a0a",
-          color: "#fff",
-          timer: 1500,
-          showConfirmButton: false,
-        });
       }
 
-      // RESET FORM - Reset username juga
+      // 4. SUCCESS HANDLING
+      Swal.fire({
+        icon: "success",
+        title: id ? "USER UPDATED" : "USER CREATED",
+        background: "#0a0a0a",
+        color: "#fff",
+        timer: 1500,
+        showConfirmButton: false,
+      });
+
       setForm({
         name: "",
         username: "",
@@ -121,10 +159,11 @@ export default function Users() {
       setEditingId(null);
       refetch();
     } catch (err) {
+      console.error("Error detail:", err.response?.data);
       Swal.fire({
         icon: "error",
         title: "FAILED",
-        text: err.response?.data?.message || "Terjadi kesalahan",
+        text: err.response?.data?.message || "Terjadi kesalahan di server",
         background: "#0a0a0a",
         color: "#fff",
       });
@@ -135,14 +174,13 @@ export default function Users() {
 
   const startEdit = (user) => {
     setEditingId(user.id);
-    // Masukkan data username ke state
     setForm({
       name: user.name || "",
       username: user.username || "",
       email: user.email || "",
       role: user.role ? user.role.toLowerCase() : "member",
-      team_id: user.team_id || "",
-      password: "",
+      team_id: user.team_id ? user.team_id.toString() : "", // Ubah ke string untuk value <select>
+      password: "", // Kosongkan password agar tidak otomatis ter-update
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
