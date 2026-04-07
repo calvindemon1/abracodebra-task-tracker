@@ -60,7 +60,7 @@ export default function TaskForm() {
 
   const calculateStatus = (task) => {
     // Jika status manual diset CANCEL, biarkan CANCEL
-    if (task.status === "CANCEL") return "CANCEL";
+    if (task.status === "CANCELLED") return "CANCELLED";
 
     if (!task.logs || task.logs.length === 0) return "TODO";
     const doneCount = task.logs.filter((l) => l.is_done).length;
@@ -168,7 +168,7 @@ export default function TaskForm() {
 
   const handleCancelTask = async (assignmentIdx) => {
     const task = store.assignments[assignmentIdx];
-    const isCanceled = task.status === "CANCEL";
+    const isCanceled = task.status === "CANCELLED";
 
     const confirm = await Swal.fire({
       title: isCanceled ? "Reactivate Task?" : "Cancel Task?",
@@ -183,7 +183,7 @@ export default function TaskForm() {
     });
 
     if (confirm.isConfirmed) {
-      const nextStatus = isCanceled ? "TODO" : "CANCEL";
+      const nextStatus = isCanceled ? "TODO" : "CANCELLED";
       setStore("assignments", assignmentIdx, "status", nextStatus);
       await syncTask(store.assignments[assignmentIdx]);
       toast(isCanceled ? "Task Reactivated" : "Task Canceled");
@@ -339,7 +339,7 @@ export default function TaskForm() {
             {(assignment, assignmentIdx) => {
               const isExpanded = () => expandedTasks().has(assignment.id);
               const status = () => calculateStatus(assignment);
-              const isCanceled = () => status() === "CANCEL";
+              const isCanceled = () => status() === "CANCELLED";
 
               return (
                 <div
