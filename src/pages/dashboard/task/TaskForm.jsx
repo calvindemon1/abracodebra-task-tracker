@@ -10,6 +10,7 @@ import {
   ChevronDown,
   GripVertical,
   XCircle,
+  ChevronLeft,
 } from "lucide-solid";
 import Swal from "sweetalert2";
 import { TasksService } from "../../../services/tasks";
@@ -296,6 +297,12 @@ export default function TaskForm() {
         }
       >
         <div class="space-y-10">
+          <button
+            onClick={() => navigate(-1)}
+            class="w-full text-xs font-black text-gray-500 hover:text-white transition-all uppercase tracking-widest flex items-center justify-end gap-2"
+          >
+            <ChevronLeft size={16} /> Kembali
+          </button>
           {/* PROJECT SELECTOR */}
           <div class="bg-blue-600/10 rounded-[32px] border border-blue-500/20 p-8 shadow-2xl">
             <div class="flex items-center gap-4 mb-6">
