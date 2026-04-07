@@ -369,7 +369,7 @@ export default function TaskForm() {
 
               return (
                 <div
-                  class={`assignment-card transition-all duration-500 border rounded-[40px] relative shadow-xl mb-6 overflow-hidden
+                  class={`assignment-card transition-all duration-500 border rounded-[10px] relative shadow-xl mb-6 overflow-hidden
                 ${isCanceled() ? "bg-red-950/20 border-red-500 shadow-red-500/20" : "bg-gray-900/40 border-white/10"}
               `}
                 >
