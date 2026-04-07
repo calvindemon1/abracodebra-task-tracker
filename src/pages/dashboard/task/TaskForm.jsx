@@ -49,7 +49,6 @@ export default function TaskForm() {
   const [projectId, setProjectId] = createSignal("");
   const [store, setStore] = createStore({ assignments: [] });
 
-  // STATE UNTUK COLLAPSE (Simpan ID task yang sedang terbuka)
   const [expandedTasks, setExpandedTasks] = createSignal(new Set());
 
   const toggleExpand = (taskId) => {
@@ -60,9 +59,7 @@ export default function TaskForm() {
   };
 
   const calculateStatus = (task) => {
-    // Jika status manual diset CANCEL, biarkan CANCEL
     if (task.status === "CANCELLED") return "CANCELLED";
-
     if (!task.logs || task.logs.length === 0) return "TODO";
     const doneCount = task.logs.filter((l) => l.is_done).length;
     if (doneCount === 0) return "ON_HOLD";
@@ -231,7 +228,7 @@ export default function TaskForm() {
         logs: [],
       },
     ]);
-    toggleExpand(tempId); // Langsung buka form pas nambah baru
+    toggleExpand(tempId);
   };
 
   const addLog = (assignmentIdx) => {
@@ -250,6 +247,7 @@ export default function TaskForm() {
   const removeAssignment = async (id, idx) => {
     const confirm = await Swal.fire({
       title: "Hapus Task?",
+      text: "Seluruh aktivitas di dalamnya akan hilang!",
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#ef4444",
@@ -259,30 +257,52 @@ export default function TaskForm() {
     if (!confirm.isConfirmed) return;
     if (typeof id === "number") await TasksService.delete(id);
     setStore("assignments", (prev) => prev.filter((_, i) => i !== idx));
+    toast("Task deleted");
   };
 
+  // --- REVISI: KONFIRMASI HAPUS ACTIVITY ---
   const removeLog = async (assignmentIdx, logId) => {
+    const confirm = await Swal.fire({
+      title: "Hapus Aktivitas?",
+      text: "Aktivitas yang dihapus tidak bisa dikembalikan.",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#3085d6",
+      background: "#0a0a0a",
+      color: "#fff",
+    });
+
+    if (!confirm.isConfirmed) return;
+
     if (typeof logId === "number") {
-      await WorksService.delete(logId);
-      const task = store.assignments[assignmentIdx];
-      const resWorks = await WorksService.getByTask(task.id);
-      setStore(
-        "assignments",
-        assignmentIdx,
-        "logs",
-        resWorks.data.map((w) => ({
-          id: w.id,
-          category: w.division_pic,
-          activity: w.activity_name,
-          notes: w.notes,
-          is_done: w.status?.toLowerCase() === "done",
-        })),
-      );
-      await syncTask(task);
+      try {
+        await WorksService.delete(logId);
+        const task = store.assignments[assignmentIdx];
+        const resWorks = await WorksService.getByTask(task.id);
+        setStore(
+          "assignments",
+          assignmentIdx,
+          "logs",
+          resWorks.data.map((w) => ({
+            id: w.id,
+            category: w.division_pic,
+            activity: w.activity_name,
+            notes: w.notes,
+            is_done: w.status?.toLowerCase() === "done",
+          })),
+        );
+        await syncTask(task);
+        toast("Activity deleted");
+      } catch (err) {
+        toast("Gagal menghapus aktivitas", "error");
+      }
     } else {
+      // Untuk data temporary (belum save ke DB)
       setStore("assignments", assignmentIdx, "logs", (prev) =>
         prev.filter((l) => l.id !== logId),
       );
+      toast("Draft activity removed");
     }
   };
 
@@ -303,7 +323,7 @@ export default function TaskForm() {
           >
             <ChevronLeft size={16} /> Kembali
           </button>
-          {/* PROJECT SELECTOR */}
+
           <div class="bg-blue-600/10 rounded-[32px] border border-blue-500/20 p-8 shadow-2xl">
             <div class="flex items-center gap-4 mb-6">
               <Layers size={24} class="text-blue-500" />
@@ -341,7 +361,6 @@ export default function TaskForm() {
             </button>
           </div>
 
-          {/* LIST ASSIGNMENTS */}
           <For each={store.assignments}>
             {(assignment, assignmentIdx) => {
               const isExpanded = () => expandedTasks().has(assignment.id);
@@ -354,7 +373,6 @@ export default function TaskForm() {
                 ${isCanceled() ? "bg-red-950/20 border-red-500 shadow-red-500/20" : "bg-gray-900/40 border-white/10"}
               `}
                 >
-                  {/* Color Side Bar */}
                   <div
                     class={`absolute top-0 left-0 w-1.5 h-full transition-colors duration-500 ${
                       isCanceled()
@@ -365,7 +383,6 @@ export default function TaskForm() {
                     }`}
                   ></div>
 
-                  {/* HEADER (Always Visible) */}
                   <div
                     class="flex items-center justify-between p-6 cursor-pointer group select-none"
                     onClick={() => toggleExpand(assignment.id)}
@@ -425,7 +442,6 @@ export default function TaskForm() {
                     </div>
                   </div>
 
-                  {/* COLLAPSIBLE CONTENT */}
                   <Show when={isExpanded()}>
                     <div class="p-8 pt-2 border-t border-white/5 animate-in slide-in-from-top-2 duration-300">
                       <div class="grid grid-cols-1 md:grid-cols-12 gap-6 mb-8">
