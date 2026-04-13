@@ -48,7 +48,6 @@ export default function TaskForm() {
   const [projects, setProjects] = createSignal([]);
   const [projectId, setProjectId] = createSignal("");
   const [store, setStore] = createStore({ assignments: [] });
-
   const [expandedTasks, setExpandedTasks] = createSignal(new Set());
 
   const toggleExpand = (taskId) => {
@@ -65,6 +64,14 @@ export default function TaskForm() {
     if (doneCount === 0) return "ON_HOLD";
     if (doneCount === task.logs.length) return "DONE";
     return "IN_PROGRESS";
+  };
+
+  // FIX: Logika sorting agar yang DONE (true) selalu di bawah (nilai 1)
+  const sortLogs = (logs) => {
+    return [...logs].sort((a, b) => {
+      if (a.is_done === b.is_done) return 0;
+      return a.is_done ? 1 : -1;
+    });
   };
 
   onMount(async () => {
@@ -114,9 +121,6 @@ export default function TaskForm() {
                   notes: w.notes || "",
                   is_done: w.status?.toLowerCase() === "done",
                 }));
-                logs.sort((a, b) =>
-                  a.is_done === b.is_done ? 0 : a.is_done ? 1 : -1,
-                );
 
                 return {
                   id: t.id,
@@ -124,7 +128,7 @@ export default function TaskForm() {
                   assignee_id: t.assignee_id ? t.assignee_id.toString() : "",
                   priority: t.priority || "NORMAL",
                   status: t.status || "TODO",
-                  logs: logs,
+                  logs: sortLogs(logs),
                 };
               }),
             );
@@ -190,28 +194,48 @@ export default function TaskForm() {
 
   const syncWork = async (task, log) => {
     if (typeof task.id !== "number") return;
-    const payload = {
-      task_id: task.id,
-      activity_name: log.activity || "-",
-      notes: log.notes || "",
-      division_pic: log.category || CATEGORIES[0],
-      status: log.is_done ? "Done" : "In Progress",
-    };
+
     try {
-      if (typeof log.id === "number") {
-        await WorksService.update(log.id, payload);
-      } else {
+      const payload = {
+        task_id: task.id,
+        activity_name: log.activity || "-",
+        notes: log.notes || "",
+        division_pic: log.category || CATEGORIES[0],
+        status: log.is_done ? "Done" : "In Progress",
+      };
+
+      // Handle ID Update jika ini item baru
+      let currentLogId = log.id;
+      if (typeof log.id !== "number") {
         const res = await WorksService.create(payload);
-        const newWorkId = res.data?.id || res.id;
-        const taskIdx = store.assignments.findIndex((a) => a.id === task.id);
-        const logIdx = store.assignments[taskIdx].logs.findIndex(
-          (l) => l.id === log.id,
-        );
-        setStore("assignments", taskIdx, "logs", logIdx, "id", newWorkId);
+        currentLogId = res.data?.id || res.id;
+      } else {
+        await WorksService.update(log.id, payload);
       }
-      await syncTask(task);
+
+      // Sync local state & re-sort
+      const taskIndex = store.assignments.findIndex((a) => a.id === task.id);
+      if (taskIndex !== -1) {
+        // Ambil data terbaru dari store, update item yang baru disync
+        const updatedLogs = store.assignments[taskIndex].logs.map((l) =>
+          l.id === log.id
+            ? { ...l, id: currentLogId, is_done: log.is_done }
+            : l,
+        );
+
+        // Sort ulang: Yang is_done: true akan lari ke bawah
+        const sorted = sortLogs(updatedLogs);
+
+        // Trigger update Solid Store secara menyeluruh untuk array logs
+        setStore("assignments", taskIndex, "logs", sorted);
+
+        // Sync status parent (TODO/IN_PROGRESS/DONE)
+        await syncTask(store.assignments[taskIndex]);
+        toast("Activity Updated");
+      }
     } catch (err) {
       console.error(err);
+      toast("Sync failed", "error");
     }
   };
 
@@ -232,6 +256,7 @@ export default function TaskForm() {
   };
 
   const addLog = (assignmentIdx) => {
+    // New items selalu ditaruh di paling atas sebelum dikerjakan
     setStore("assignments", assignmentIdx, "logs", (prev) => [
       {
         id: `temp-log-${Date.now()}`,
@@ -260,7 +285,6 @@ export default function TaskForm() {
     toast("Task deleted");
   };
 
-  // --- REVISI: KONFIRMASI HAPUS ACTIVITY ---
   const removeLog = async (assignmentIdx, logId) => {
     const confirm = await Swal.fire({
       title: "Hapus Aktivitas?",
@@ -280,25 +304,20 @@ export default function TaskForm() {
         await WorksService.delete(logId);
         const task = store.assignments[assignmentIdx];
         const resWorks = await WorksService.getByTask(task.id);
-        setStore(
-          "assignments",
-          assignmentIdx,
-          "logs",
-          resWorks.data.map((w) => ({
-            id: w.id,
-            category: w.division_pic,
-            activity: w.activity_name,
-            notes: w.notes,
-            is_done: w.status?.toLowerCase() === "done",
-          })),
-        );
+        const refreshedLogs = (resWorks.data || []).map((w) => ({
+          id: w.id,
+          category: w.division_pic,
+          activity: w.activity_name,
+          notes: w.notes,
+          is_done: w.status?.toLowerCase() === "done",
+        }));
+        setStore("assignments", assignmentIdx, "logs", sortLogs(refreshedLogs));
         await syncTask(task);
         toast("Activity deleted");
       } catch (err) {
         toast("Gagal menghapus aktivitas", "error");
       }
     } else {
-      // Untuk data temporary (belum save ke DB)
       setStore("assignments", assignmentIdx, "logs", (prev) =>
         prev.filter((l) => l.id !== logId),
       );
@@ -308,6 +327,10 @@ export default function TaskForm() {
 
   return (
     <div class="p-6 max-w-5xl mx-auto mb-20 text-white italic">
+      <style>{`
+        .assignment-card { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .activity-item { transition: all 0.3s ease; }
+      `}</style>
       <Show
         when={!isLoading()}
         fallback={
@@ -369,7 +392,7 @@ export default function TaskForm() {
 
               return (
                 <div
-                  class={`assignment-card transition-all duration-500 border rounded-[10px] relative shadow-xl mb-6 overflow-hidden
+                  class={`assignment-card border rounded-[10px] relative shadow-xl mb-6 overflow-hidden
                 ${isCanceled() ? "bg-red-950/20 border-red-500 shadow-red-500/20" : "bg-gray-900/40 border-white/10"}
               `}
                 >
@@ -559,23 +582,21 @@ export default function TaskForm() {
                         <div class="space-y-4">
                           <For each={assignment.logs}>
                             {(log, logIdx) => (
-                              <div class="flex items-start gap-4 group/item p-2 rounded-2xl transition-all hover:bg-white/5 border border-transparent">
+                              <div class="activity-item flex items-start gap-4 group/item p-2 rounded-2xl transition-all hover:bg-white/5 border border-transparent">
                                 <div class="mt-2.5 text-gray-700 opacity-30 group-hover/item:opacity-100">
                                   <GripVertical size={16} />
                                 </div>
                                 <button
                                   onClick={async () => {
-                                    const newStatus = !log.is_done;
-                                    setStore(
-                                      "assignments",
-                                      assignmentIdx(),
-                                      "logs",
-                                      logIdx(),
-                                      "is_done",
-                                      newStatus,
-                                    );
-                                    await syncWork(assignment, {
-                                      ...log,
+                                    const aIdx = assignmentIdx();
+                                    const lIdx = logIdx();
+                                    const currentLog =
+                                      store.assignments[aIdx].logs[lIdx];
+                                    const newStatus = !currentLog.is_done;
+
+                                    // Kirim sync (di dalam syncWork sudah ada logika sorting ulang)
+                                    await syncWork(store.assignments[aIdx], {
+                                      ...currentLog,
                                       is_done: newStatus,
                                     });
                                   }}
