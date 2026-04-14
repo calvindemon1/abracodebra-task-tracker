@@ -49,7 +49,6 @@ export default function TaskList() {
       const mergedData = rawProjects.map((proj) => {
         const projectTasks = allTasks.filter((t) => t.project_id === proj.id);
 
-        // --- LOGIC BARU DISINI ---
         // 1. Ambil task yang tidak di-cancel (Task Aktif)
         const activeTasks = projectTasks.filter(
           (t) => t.status !== "CANCELLED",
@@ -61,23 +60,35 @@ export default function TaskList() {
 
         let finalStatus = proj.status;
 
-        // Kondisi A: SEMUANYA di-cancel (100% dari total task adalah cancelled)
+        // --- LOGIC STATUS UPDATE ---
+
+        // A. SEMUANYA di-cancel
         if (
           projectTasks.length > 0 &&
           cancelledTasks.length === projectTasks.length
         ) {
           finalStatus = "CANCELLED";
         }
-        // Kondisi B: Ada task aktif, dan SEMUA task aktif tersebut statusnya DONE
-        // (Kita abaikan task yang CANCELLED dalam pengecekan DONE ini)
+        // B. SEMUA task aktif statusnya DONE (100%)
         else if (
           activeTasks.length > 0 &&
           activeTasks.every((t) => t.status === "DONE")
         ) {
           finalStatus = "DONE";
         }
-        // Kondisi C: Masih ada task aktif yang statusnya TODO atau IN_PROGRESS
-        else {
+        // C. CEK ALMOST DONE (>= 80%)
+        else if (activeTasks.length > 0) {
+          const doneCount = activeTasks.filter(
+            (t) => t.status === "DONE",
+          ).length;
+          const percentage = (doneCount / activeTasks.length) * 100;
+
+          if (percentage >= 80) {
+            finalStatus = "ALMOST DONE";
+          } else {
+            finalStatus = proj.status; // Tetap status asli (TODO/IN_PROGRESS)
+          }
+        } else {
           finalStatus = proj.status;
         }
 
@@ -159,12 +170,22 @@ export default function TaskList() {
   return (
     <div class="p-6 min-h-screen text-white font-sans italic">
       <style>{`
-        .page-enter { animation: pageIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes pageIn { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
-        .expand-enter { animation: expandIn 0.4s ease-out forwards; }
-        @keyframes expandIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-        tr { transition: background-color 0.4s ease, border-color 0.4s ease; }
-      `}</style>
+      .page-enter { animation: pageIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+      @keyframes pageIn { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+      .expand-enter { animation: expandIn 0.4s ease-out forwards; }
+      @keyframes expandIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+      tr { transition: background-color 0.4s ease, border-color 0.4s ease; }
+
+      /* TAMBAHAN DISINI BRO */
+      .row-cancelled td { background-color: rgba(239, 68, 68, 0.04) !important; }
+      .row-cancelled:hover td { background-color: rgba(239, 68, 68, 0.08) !important; }
+
+      .row-done td { background-color: rgba(34, 197, 94, 0.04) !important; }
+      .row-done:hover td { background-color: rgba(34, 197, 94, 0.08) !important; }
+
+      .row-almost-done td { background-color: rgba(234, 179, 8, 0.04) !important; }
+      .row-almost-done:hover td { background-color: rgba(234, 179, 8, 0.08) !important; }
+    `}</style>
 
       <div
         class={`max-w-[1600px] mx-auto ${isMounted() ? "page-enter" : "opacity-0"}`}
@@ -215,31 +236,42 @@ export default function TaskList() {
               <tbody class="divide-y divide-white/5">
                 <For each={projects()}>
                   {(project) => {
+                    // Di dalam loop render projects
                     const isCancelled = project.status === "CANCELLED";
                     const isDone = project.status === "DONE";
+                    const isAlmostDone = project.status === "ALMOST DONE"; // Tambahin ini
 
-                    // --- REVISI: BACKGROUND SEBARIS ---
+                    // Update Row Class (untuk background sebaris)
                     const rowBgClass = isCancelled
-                      ? "bg-red-600/[0.03] hover:bg-red-600/[0.08]"
+                      ? "row-cancelled"
                       : isDone
-                        ? "bg-green-600/[0.03] hover:bg-green-600/[0.08]"
-                        : "hover:bg-white/[0.02]";
+                        ? "row-done"
+                        : isAlmostDone
+                          ? "row-almost-done" // Kita buat class baru di style
+                          : "row-active";
 
+                    // Update Theme Color (untuk text & icon)
                     const themeColor = isCancelled
                       ? "text-red-500"
                       : isDone
                         ? "text-green-500"
-                        : "text-blue-500";
+                        : isAlmostDone
+                          ? "text-yellow-500" // Warna kuning
+                          : "text-blue-500";
                     const themeBorder = isCancelled
                       ? "border-red-500/20"
                       : isDone
                         ? "border-green-500/20"
-                        : "border-blue-500/10";
+                        : isAlmostDone
+                          ? "border-yellow-500/20" // Warna kuning
+                          : "border-blue-500/10";
                     const themeIconBg = isCancelled
                       ? "bg-red-500/10"
                       : isDone
                         ? "bg-green-500/10"
-                        : "bg-blue-600/10";
+                        : isAlmostDone
+                          ? "bg-yellow-500/10" // Warna kuning
+                          : "bg-blue-600/10";
 
                     return (
                       <>
@@ -346,6 +378,7 @@ export default function TaskList() {
                                   </span>
                                 </div>
                               </Match>
+
                               <Match when={isDone}>
                                 <div class="flex flex-col items-center gap-1">
                                   <CheckCircle2
@@ -357,6 +390,34 @@ export default function TaskList() {
                                   </span>
                                 </div>
                               </Match>
+
+                              {/* TAMBAHAN UNTUK ALMOST DONE */}
+                              <Match when={isAlmostDone}>
+                                <div class="flex flex-col items-center gap-2">
+                                  <div class="flex items-center gap-2">
+                                    <Loader2
+                                      size={16}
+                                      class="text-yellow-500 animate-[spin_3s_linear_infinite]"
+                                    />
+                                    <span class="text-[8px] font-black uppercase text-yellow-500 tracking-widest leading-none italic">
+                                      Almost Done
+                                    </span>
+                                  </div>
+                                  <div class="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                                    <div
+                                      class="h-full bg-yellow-500 transition-all duration-1000 shadow-[0_0_10px_rgba(234,179,8,0.3)]"
+                                      style={{
+                                        width: `${calculateTotalProgress(project.tasks)}%`,
+                                      }}
+                                    ></div>
+                                  </div>
+                                  <span class="text-[10px] font-black text-yellow-500 italic">
+                                    {calculateTotalProgress(project.tasks)}%
+                                    COMPLETE
+                                  </span>
+                                </div>
+                              </Match>
+
                               <Match when={true}>
                                 <div class="flex flex-col items-center gap-2">
                                   <div class="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
