@@ -66,7 +66,6 @@ export default function TaskForm() {
     return "IN_PROGRESS";
   };
 
-  // FIX: Logika sorting agar yang DONE (true) selalu di bawah (nilai 1)
   const sortLogs = (logs) => {
     return [...logs].sort((a, b) => {
       if (a.is_done === b.is_done) return 0;
@@ -168,6 +167,67 @@ export default function TaskForm() {
     }
   };
 
+  // --- REVISI LOGIC: SMART CHECK UNTUK DONE & CANCELLED ---
+  const checkAndSyncProjectStatus = async () => {
+    if (!projectId() || store.assignments.length === 0) return;
+
+    // Pisahkan mana task yang masih aktif dan mana yang sudah dicancel
+    const activeTasks = store.assignments.filter(
+      (a) => a.status !== "CANCELLED",
+    );
+    const cancelledTasks = store.assignments.filter(
+      (a) => a.status === "CANCELLED",
+    );
+
+    let targetStatus = "";
+
+    // 1. Kondisi CANCELLED: Jika SEMUA task di dalam project statusnya CANCELLED
+    if (cancelledTasks.length === store.assignments.length) {
+      targetStatus = "CANCELLED";
+    }
+    // 2. Kondisi DONE:
+    // Jika ada task yang aktif, DAN semuanya berstatus DONE
+    // (Task yang dicancel diabaikan)
+    else if (
+      activeTasks.length > 0 &&
+      activeTasks.every((a) => calculateStatus(a) === "DONE")
+    ) {
+      targetStatus = "DONE";
+    }
+    // 3. Kondisi TODO/IN_PROGRESS: Jika masih ada yang belum kelar
+    else {
+      targetStatus = "TODO";
+    }
+
+    // --- SYNC KE DATABASE ---
+    try {
+      const currentProj = projects().find(
+        (p) => p.id.toString() === projectId(),
+      );
+
+      // Hanya kirim API jika status yang dihitung BERBEDA dengan status di database saat ini
+      if (currentProj && currentProj.status !== targetStatus) {
+        await ProjectsService.update(projectId(), {
+          ...currentProj,
+          status: targetStatus,
+        });
+
+        // Update local state projects() agar tidak loop update terus menerus
+        setProjects((p) =>
+          p.map((item) =>
+            item.id.toString() === projectId()
+              ? { ...item, status: targetStatus }
+              : item,
+          ),
+        );
+
+        toast(`Project Status: ${targetStatus}`);
+      }
+    } catch (err) {
+      console.error("Gagal update project status", err);
+    }
+  };
+
   const handleCancelTask = async (assignmentIdx) => {
     const task = store.assignments[assignmentIdx];
     const isCanceled = task.status === "CANCELLED";
@@ -188,6 +248,7 @@ export default function TaskForm() {
       const nextStatus = isCanceled ? "TODO" : "CANCELLED";
       setStore("assignments", assignmentIdx, "status", nextStatus);
       await syncTask(store.assignments[assignmentIdx]);
+      await checkAndSyncProjectStatus(); // Cek status project setelah cancel
       toast(isCanceled ? "Task Reactivated" : "Task Canceled");
     }
   };
@@ -204,7 +265,6 @@ export default function TaskForm() {
         status: log.is_done ? "Done" : "In Progress",
       };
 
-      // Handle ID Update jika ini item baru
       let currentLogId = log.id;
       if (typeof log.id !== "number") {
         const res = await WorksService.create(payload);
@@ -213,24 +273,20 @@ export default function TaskForm() {
         await WorksService.update(log.id, payload);
       }
 
-      // Sync local state & re-sort
       const taskIndex = store.assignments.findIndex((a) => a.id === task.id);
       if (taskIndex !== -1) {
-        // Ambil data terbaru dari store, update item yang baru disync
         const updatedLogs = store.assignments[taskIndex].logs.map((l) =>
           l.id === log.id
             ? { ...l, id: currentLogId, is_done: log.is_done }
             : l,
         );
 
-        // Sort ulang: Yang is_done: true akan lari ke bawah
         const sorted = sortLogs(updatedLogs);
-
-        // Trigger update Solid Store secara menyeluruh untuk array logs
         setStore("assignments", taskIndex, "logs", sorted);
 
-        // Sync status parent (TODO/IN_PROGRESS/DONE)
         await syncTask(store.assignments[taskIndex]);
+        await checkAndSyncProjectStatus(); // Cek status project setelah aktivitas berubah
+
         toast("Activity Updated");
       }
     } catch (err) {
@@ -256,7 +312,6 @@ export default function TaskForm() {
   };
 
   const addLog = (assignmentIdx) => {
-    // New items selalu ditaruh di paling atas sebelum dikerjakan
     setStore("assignments", assignmentIdx, "logs", (prev) => [
       {
         id: `temp-log-${Date.now()}`,
@@ -282,6 +337,7 @@ export default function TaskForm() {
     if (!confirm.isConfirmed) return;
     if (typeof id === "number") await TasksService.delete(id);
     setStore("assignments", (prev) => prev.filter((_, i) => i !== idx));
+    await checkAndSyncProjectStatus(); // Cek status project setelah task dihapus
     toast("Task deleted");
   };
 
@@ -313,6 +369,7 @@ export default function TaskForm() {
         }));
         setStore("assignments", assignmentIdx, "logs", sortLogs(refreshedLogs));
         await syncTask(task);
+        await checkAndSyncProjectStatus();
         toast("Activity deleted");
       } catch (err) {
         toast("Gagal menghapus aktivitas", "error");
@@ -594,7 +651,6 @@ export default function TaskForm() {
                                       store.assignments[aIdx].logs[lIdx];
                                     const newStatus = !currentLog.is_done;
 
-                                    // Kirim sync (di dalam syncWork sudah ada logika sorting ulang)
                                     await syncWork(store.assignments[aIdx], {
                                       ...currentLog,
                                       is_done: newStatus,
