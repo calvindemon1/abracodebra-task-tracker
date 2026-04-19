@@ -6,6 +6,7 @@ import {
   onCleanup,
   Switch,
   Match,
+  createMemo,
 } from "solid-js";
 import { useNavigate, A } from "@solidjs/router";
 import {
@@ -20,6 +21,8 @@ import {
   User,
   XCircle,
   CheckCircle2,
+  Search as SearchIcon,
+  ArrowUpDown,
 } from "lucide-solid";
 import Swal from "sweetalert2";
 import { Portal } from "solid-js/web";
@@ -35,6 +38,22 @@ export default function TaskList() {
   const [expandedId, setExpandedId] = createSignal(null);
   const [dropdownPos, setDropdownPos] = createSignal({ x: 0, y: 0 });
 
+  // Fitur States
+  const [searchTerm, setSearchTerm] = createSignal("");
+  const [filterStatus, setFilterStatus] = createSignal("ALL");
+  const [sortOrder, setSortOrder] = createSignal("DEFAULT"); // DEFAULT, ASC (0-100), DESC (100-0)
+
+  // Helper hitung progres (dipakai di logic sortir juga)
+  const getProgressVal = (tasks = []) => {
+    const activeTasks = tasks.filter((t) => t.status !== "CANCELLED");
+    if (activeTasks.length === 0) return 0;
+    return Math.round(
+      (activeTasks.filter((t) => t.status === "DONE").length /
+        activeTasks.length) *
+        100,
+    );
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     try {
@@ -48,59 +67,39 @@ export default function TaskList() {
 
       const mergedData = rawProjects.map((proj) => {
         const projectTasks = allTasks.filter((t) => t.project_id === proj.id);
-
-        // 1. Ambil task yang tidak di-cancel (Task Aktif)
         const activeTasks = projectTasks.filter(
           (t) => t.status !== "CANCELLED",
         );
-        // 2. Ambil task yang di-cancel
         const cancelledTasks = projectTasks.filter(
           (t) => t.status === "CANCELLED",
         );
 
         let finalStatus = proj.status;
+        const progress = getProgressVal(projectTasks);
 
-        // --- LOGIC STATUS UPDATE ---
-
-        // A. SEMUANYA di-cancel
         if (
           projectTasks.length > 0 &&
           cancelledTasks.length === projectTasks.length
         ) {
           finalStatus = "CANCELLED";
-        }
-        // B. SEMUA task aktif statusnya DONE (100%)
-        else if (
+        } else if (
           activeTasks.length > 0 &&
           activeTasks.every((t) => t.status === "DONE")
         ) {
           finalStatus = "DONE";
-        }
-        // C. CEK ALMOST DONE (>= 80%)
-        else if (activeTasks.length > 0) {
-          const doneCount = activeTasks.filter(
-            (t) => t.status === "DONE",
-          ).length;
-          const percentage = (doneCount / activeTasks.length) * 100;
-
-          if (percentage >= 80) {
-            finalStatus = "ALMOST DONE";
-          } else {
-            finalStatus = proj.status; // Tetap status asli (TODO/IN_PROGRESS)
-          }
-        } else {
-          finalStatus = proj.status;
+        } else if (progress >= 80) {
+          finalStatus = "ALMOST DONE";
         }
 
         return {
           ...proj,
           status: finalStatus,
           tasks: projectTasks,
+          progressVal: progress,
         };
       });
 
-      const activeProjects = mergedData.filter((proj) => proj.tasks.length > 0);
-      setProjects(activeProjects);
+      setProjects(mergedData.filter((proj) => proj.tasks.length > 0));
     } catch (err) {
       console.error(err);
       Swal.fire({
@@ -113,6 +112,43 @@ export default function TaskList() {
       setIsLoading(false);
     }
   };
+
+  // --- LOGIC SEARCH, FILTER, SORT ---
+  const filteredAndSortedProjects = createMemo(() => {
+    let list = [...projects()];
+
+    // 1. Search
+    if (searchTerm()) {
+      list = list.filter((p) =>
+        p.name.toLowerCase().includes(searchTerm().toLowerCase()),
+      );
+    }
+
+    // 2. Filter Status
+    if (filterStatus() !== "ALL") {
+      list = list.filter((p) => p.status === filterStatus());
+    }
+
+    // 3. Sort berdasarkan Persentase Progres
+    const statusWeight = {
+      TODO: 1,
+      IN_PROGRESS: 2,
+      "ALMOST DONE": 3,
+      DONE: 4,
+      CANCELLED: 5,
+    };
+
+    list.sort((a, b) => {
+      // Sort Manual (Header Click)
+      if (sortOrder() === "ASC") return a.progressVal - b.progressVal; // 0% ke 100%
+      if (sortOrder() === "DESC") return b.progressVal - a.progressVal; // 100% ke 0%
+
+      // Default Sort: TODO Paling Atas
+      return (statusWeight[a.status] || 99) - (statusWeight[b.status] || 99);
+    });
+
+    return list;
+  });
 
   onMount(() => {
     fetchData();
@@ -129,21 +165,12 @@ export default function TaskList() {
     onCleanup(() => window.removeEventListener("mousedown", handleGlobalClick));
   });
 
-  const calculateTotalProgress = (tasks = []) => {
-    if (!tasks || tasks.length === 0) return 0;
-    // Hitung hanya berdasarkan task yang TIDAK di-cancel
-    const activeTasks = tasks.filter((t) => t.status !== "CANCELLED");
-    if (activeTasks.length === 0) return 0; // Jika semua cancel, progress ga relevan (0)
-
-    const doneTasks = activeTasks.filter((t) => t.status === "DONE").length;
-    return Math.round((doneTasks / activeTasks.length) * 100);
-  };
-
   const getUniqueAssignees = (tasks = []) => {
-    const names = tasks
-      .map((t) => t.assignee_name || t.assignee?.name)
-      .filter(Boolean);
-    return [...new Set(names)];
+    return [
+      ...new Set(
+        tasks.map((t) => t.assignee_name || t.assignee?.name).filter(Boolean),
+      ),
+    ];
   };
 
   const handleDeleteProject = async (id) => {
@@ -170,34 +197,57 @@ export default function TaskList() {
   return (
     <div class="p-6 min-h-screen text-white font-sans italic">
       <style>{`
-      .page-enter { animation: pageIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-      @keyframes pageIn { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
-      .expand-enter { animation: expandIn 0.4s ease-out forwards; }
-      @keyframes expandIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-      tr { transition: background-color 0.4s ease, border-color 0.4s ease; }
+        .page-enter { animation: pageIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes pageIn { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+        .expand-enter { animation: expandIn 0.4s ease-out forwards; }
+        @keyframes expandIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        tr { transition: background-color 0.4s ease; }
+        
+        .row-cancelled td { background-color: rgba(239, 68, 68, 0.04) !important; }
+        .row-done td { background-color: rgba(34, 197, 94, 0.04) !important; }
+        .row-almost-done td { background-color: rgba(234, 179, 8, 0.04) !important; }
 
-      /* TAMBAHAN DISINI BRO */
-      .row-cancelled td { background-color: rgba(239, 68, 68, 0.04) !important; }
-      .row-cancelled:hover td { background-color: rgba(239, 68, 68, 0.08) !important; }
-
-      .row-done td { background-color: rgba(34, 197, 94, 0.04) !important; }
-      .row-done:hover td { background-color: rgba(34, 197, 94, 0.08) !important; }
-
-      .row-almost-done td { background-color: rgba(234, 179, 8, 0.04) !important; }
-      .row-almost-done:hover td { background-color: rgba(234, 179, 8, 0.08) !important; }
-    `}</style>
+        .custom-scrollbar::-webkit-scrollbar { height: 8px; width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.5); }
+      `}</style>
 
       <div
         class={`max-w-[1600px] mx-auto ${isMounted() ? "page-enter" : "opacity-0"}`}
       >
-        <div class="flex justify-between items-end mb-12 px-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-12 px-4">
           <div>
             <h1 class="text-6xl font-black tracking-tighter uppercase text-white leading-none">
               Project <span class="text-blue-500 font-light italic">Hub</span>
             </h1>
-            <p class="text-gray-600 text-[10px] font-black uppercase tracking-[0.4em] mt-4">
-              Active Monitoring System
-            </p>
+            <div class="flex items-center gap-4 mt-6">
+              <div class="relative group">
+                <SearchIcon
+                  size={18}
+                  class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-500 transition-colors"
+                />
+                <input
+                  type="text"
+                  placeholder="Find project..."
+                  class="bg-white/5 border border-white/10 rounded-2xl pl-12 pr-6 py-3 text-sm font-bold outline-none focus:border-blue-500/50 w-64 transition-all shadow-inner"
+                  value={searchTerm()}
+                  onInput={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div class="flex items-center bg-white/5 border border-white/10 rounded-2xl p-1">
+                <For each={["ALL", "DONE", "TODO", "CANCELLED"]}>
+                  {(status) => (
+                    <button
+                      onClick={() => setFilterStatus(status)}
+                      class={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${filterStatus() === status ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-gray-500 hover:text-white"}`}
+                    >
+                      {status}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
           </div>
           <A
             href="/main/task/create"
@@ -216,67 +266,57 @@ export default function TaskList() {
                 size={64}
               />
               <span class="text-[10px] font-black uppercase tracking-widest text-gray-500 italic">
-                Syncing Data...
+                Processing Assignments...
               </span>
             </div>
           }
         >
-          <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 overflow-hidden shadow-2xl">
-            <table class="w-full text-left border-collapse">
+          <div class="bg-gray-900/40 backdrop-blur-3xl rounded-[40px] border border-white/10 shadow-2xl overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left border-collapse min-w-[1000px]">
               <thead class="bg-white/5 text-[9px] uppercase font-black tracking-[0.3em] text-gray-500 border-b border-white/5">
                 <tr>
                   <th class="p-8 w-12 text-center">#</th>
                   <th class="p-8">Project Details</th>
                   <th class="p-8">Workforce</th>
                   <th class="p-8 text-center">Volume</th>
-                  <th class="p-8 text-center">Status / Progress</th>
+                  <th
+                    class="p-8 text-center cursor-pointer hover:text-blue-500 transition-colors"
+                    onClick={() =>
+                      setSortOrder((prev) => (prev === "DESC" ? "ASC" : "DESC"))
+                    }
+                  >
+                    <div class="flex items-center justify-center gap-2">
+                      Status / Progress <ArrowUpDown size={12} />
+                    </div>
+                  </th>
                   <th class="p-8 text-right">Action</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-white/5">
-                <For each={projects()}>
+                <For each={filteredAndSortedProjects()}>
                   {(project) => {
-                    // Di dalam loop render projects
                     const isCancelled = project.status === "CANCELLED";
                     const isDone = project.status === "DONE";
-                    const isAlmostDone = project.status === "ALMOST DONE"; // Tambahin ini
-
-                    // Update Row Class (untuk background sebaris)
+                    const isAlmostDone = project.status === "ALMOST DONE";
                     const rowBgClass = isCancelled
                       ? "row-cancelled"
                       : isDone
                         ? "row-done"
                         : isAlmostDone
-                          ? "row-almost-done" // Kita buat class baru di style
+                          ? "row-almost-done"
                           : "row-active";
-
-                    // Update Theme Color (untuk text & icon)
                     const themeColor = isCancelled
                       ? "text-red-500"
                       : isDone
                         ? "text-green-500"
                         : isAlmostDone
-                          ? "text-yellow-500" // Warna kuning
+                          ? "text-yellow-500"
                           : "text-blue-500";
-                    const themeBorder = isCancelled
-                      ? "border-red-500/20"
-                      : isDone
-                        ? "border-green-500/20"
-                        : isAlmostDone
-                          ? "border-yellow-500/20" // Warna kuning
-                          : "border-blue-500/10";
-                    const themeIconBg = isCancelled
-                      ? "bg-red-500/10"
-                      : isDone
-                        ? "bg-green-500/10"
-                        : isAlmostDone
-                          ? "bg-yellow-500/10" // Warna kuning
-                          : "bg-blue-600/10";
 
                     return (
                       <>
                         <tr
-                          class={`group transition-all cursor-pointer ${rowBgClass} ${expandedId() === project.id ? "bg-white/[0.05]" : ""}`}
+                          class={`group transition-all cursor-pointer hover:bg-white/[0.02] ${rowBgClass} ${expandedId() === project.id ? "bg-white/[0.05]" : ""}`}
                           onClick={() =>
                             setExpandedId(
                               expandedId() === project.id ? null : project.id,
@@ -293,13 +333,13 @@ export default function TaskList() {
                           <td class="p-8">
                             <div class="flex items-center gap-5">
                               <div
-                                class={`p-4 rounded-2xl border transition-colors ${themeIconBg} ${themeBorder} ${themeColor}`}
+                                class={`p-4 rounded-2xl border transition-colors ${isCancelled ? "bg-red-500/10 border-red-500/20 text-red-500" : isDone ? "bg-green-500/10 border-green-500/20 text-green-500" : isAlmostDone ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-500" : "bg-blue-600/10 border-blue-500/10 text-blue-500"}`}
                               >
                                 <Layers size={24} />
                               </div>
                               <div>
                                 <div
-                                  class={`font-black text-2xl tracking-tighter uppercase transition-colors italic ${isCancelled ? "text-red-500/80" : isDone ? "text-green-500/80" : "group-hover:text-blue-400"}`}
+                                  class={`font-black text-2xl tracking-tighter uppercase transition-colors italic ${isCancelled ? "text-red-500/80" : isDone ? "text-green-500/80" : isAlmostDone ? "text-yellow-500/80" : "group-hover:text-blue-400"}`}
                                 >
                                   {project.name}
                                 </div>
@@ -308,13 +348,7 @@ export default function TaskList() {
                                     {project.project_identity}
                                   </span>
                                   <span
-                                    class={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${
-                                      isCancelled
-                                        ? "border-red-500/30 text-red-500 bg-red-500/5"
-                                        : isDone
-                                          ? "border-green-500/30 text-green-500 bg-green-500/5"
-                                          : "border-blue-500/30 text-blue-500"
-                                    }`}
+                                    class={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${isCancelled ? "border-red-500/30 text-red-500 bg-red-500/5" : isDone ? "border-green-500/30 text-green-500 bg-green-500/5" : isAlmostDone ? "border-yellow-500/30 text-yellow-500 bg-yellow-500/5" : "border-blue-500/30 text-blue-500"}`}
                                   >
                                     {project.status}
                                   </span>
@@ -333,13 +367,7 @@ export default function TaskList() {
                                 {(name) => (
                                   <div
                                     title={name}
-                                    class={`w-10 h-10 rounded-full border-2 border-gray-900 flex items-center justify-center text-[10px] font-black -ml-3 first:ml-0 text-white uppercase shadow-lg transition-transform hover:-translate-y-1 ${
-                                      isCancelled
-                                        ? "bg-red-900"
-                                        : isDone
-                                          ? "bg-green-700"
-                                          : "bg-blue-600"
-                                    }`}
+                                    class={`w-10 h-10 rounded-full border-2 border-gray-900 flex items-center justify-center text-[10px] font-black -ml-3 first:ml-0 text-white uppercase shadow-lg transition-transform hover:-translate-y-1 ${isCancelled ? "bg-red-900" : isDone ? "bg-green-700" : "bg-blue-600"}`}
                                   >
                                     {name.substring(0, 2)}
                                   </div>
@@ -350,7 +378,9 @@ export default function TaskList() {
                                   getUniqueAssignees(project.tasks).length > 3
                                 }
                               >
-                                <div class="text-[10px] font-black text-gray-600 ml-3">
+                                <div
+                                  class={`text-[10px] font-black ml-3 ${themeColor}`}
+                                >
                                   +
                                   {getUniqueAssignees(project.tasks).length - 3}
                                 </div>
@@ -360,12 +390,11 @@ export default function TaskList() {
                           <td class="p-8 text-center">
                             <div class="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">
                               <span
-                                class={`text-2xl italic font-black ${isCancelled ? "text-red-500" : isDone ? "text-green-500" : "text-white"}`}
+                                class={`text-2xl italic font-black ${themeColor}`}
                               >
                                 {project.tasks?.length || 0}
                               </span>{" "}
-                              <br />
-                              Tasks
+                              <br /> Tasks
                             </div>
                           </td>
                           <td class="p-8 text-center">
@@ -374,11 +403,10 @@ export default function TaskList() {
                                 <div class="flex flex-col items-center gap-1 opacity-70">
                                   <XCircle size={20} class="text-red-500" />
                                   <span class="text-[8px] font-black uppercase text-red-500 tracking-widest italic">
-                                    Project Terminated
+                                    Terminated
                                   </span>
                                 </div>
                               </Match>
-
                               <Match when={isDone}>
                                 <div class="flex flex-col items-center gap-1">
                                   <CheckCircle2
@@ -386,12 +414,10 @@ export default function TaskList() {
                                     class="text-green-500"
                                   />
                                   <span class="text-[8px] font-black uppercase text-green-500 tracking-widest leading-none italic">
-                                    All Tasks Complete
+                                    Complete
                                   </span>
                                 </div>
                               </Match>
-
-                              {/* TAMBAHAN UNTUK ALMOST DONE */}
                               <Match when={isAlmostDone}>
                                 <div class="flex flex-col items-center gap-2">
                                   <div class="flex items-center gap-2">
@@ -407,30 +433,27 @@ export default function TaskList() {
                                     <div
                                       class="h-full bg-yellow-500 transition-all duration-1000 shadow-[0_0_10px_rgba(234,179,8,0.3)]"
                                       style={{
-                                        width: `${calculateTotalProgress(project.tasks)}%`,
+                                        width: `${project.progressVal}%`,
                                       }}
                                     ></div>
                                   </div>
                                   <span class="text-[10px] font-black text-yellow-500 italic">
-                                    {calculateTotalProgress(project.tasks)}%
-                                    COMPLETE
+                                    {project.progressVal}%
                                   </span>
                                 </div>
                               </Match>
-
                               <Match when={true}>
                                 <div class="flex flex-col items-center gap-2">
                                   <div class="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
                                     <div
                                       class="h-full bg-blue-500 transition-all duration-1000 shadow-[0_0_10px_rgba(59,130,246,0.3)]"
                                       style={{
-                                        width: `${calculateTotalProgress(project.tasks)}%`,
+                                        width: `${project.progressVal}%`,
                                       }}
                                     ></div>
                                   </div>
                                   <span class="text-[10px] font-black text-blue-400 italic">
-                                    {calculateTotalProgress(project.tasks)}%
-                                    COMPLETE
+                                    {project.progressVal}%
                                   </span>
                                 </div>
                               </Match>
@@ -455,93 +478,53 @@ export default function TaskList() {
                             </button>
                           </td>
                         </tr>
-
+                        {/* Task Expansion Row */}
                         <Show when={expandedId() === project.id}>
                           <tr
-                            class={`expand-enter border-b border-white/5 ${isCancelled ? "bg-red-600/[0.02]" : isDone ? "bg-green-600/[0.02]" : "bg-black/40"}`}
+                            class={`expand-enter border-b border-white/5 ${isCancelled ? "bg-red-600/[0.02]" : isDone ? "bg-green-600/[0.02]" : isAlmostDone ? "bg-yellow-600/[0.02]" : "bg-black/40"}`}
                           >
                             <td colspan="6" class="p-12">
                               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 <For each={project.tasks}>
-                                  {(task) => {
-                                    const taskIsCanceled =
-                                      task.status === "CANCELLED";
-                                    const taskIsDone = task.status === "DONE";
-                                    return (
-                                      <div
-                                        class={`rounded-[32px] p-8 flex flex-col gap-6 transition-all border group/card relative overflow-hidden ${
-                                          taskIsCanceled
-                                            ? "bg-red-500/5 border-red-500/20 grayscale"
-                                            : taskIsDone
-                                              ? "bg-green-500/5 border-green-500/30"
-                                              : "bg-white/5 border-white/5 hover:border-blue-500/30"
-                                        }`}
-                                      >
-                                        <div class="flex justify-between items-start relative z-10">
-                                          <div class="flex items-center gap-4">
-                                            <div
-                                              class={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-all ${
-                                                taskIsCanceled
-                                                  ? "bg-zinc-900 text-red-500 border-red-500/10"
-                                                  : taskIsDone
-                                                    ? "bg-zinc-900 text-green-500 border-green-500/20"
-                                                    : "bg-gray-800 text-blue-400 border-white/5 group-hover/card:bg-blue-600 group-hover/card:text-white"
-                                              }`}
-                                            >
-                                              {taskIsCanceled ? (
-                                                <XCircle size={20} />
-                                              ) : taskIsDone ? (
-                                                <CheckCircle2 size={20} />
-                                              ) : (
-                                                <User size={20} />
-                                              )}
-                                            </div>
-                                            <div>
-                                              <div
-                                                class={`text-[11px] font-black uppercase tracking-tight ${taskIsCanceled ? "text-red-500" : taskIsDone ? "text-green-500" : "text-white"}`}
-                                              >
-                                                {task.assignee_name ||
-                                                  "Unassigned"}
-                                              </div>
-                                              <div
-                                                class={`text-[9px] font-black uppercase tracking-[0.2em] mt-0.5 italic ${taskIsCanceled ? "text-red-900" : taskIsDone ? "text-green-900" : "text-gray-600"}`}
-                                              >
-                                                {task.title}
-                                              </div>
-                                            </div>
-                                          </div>
+                                  {(task) => (
+                                    <div
+                                      class={`rounded-[32px] p-8 flex flex-col gap-6 border relative overflow-hidden ${task.status === "CANCELLED" ? "bg-red-500/5 border-red-500/20 grayscale" : task.status === "DONE" ? "bg-green-500/5 border-green-500/30" : "bg-white/5 border-white/5"}`}
+                                    >
+                                      <div class="flex justify-between items-start relative z-10">
+                                        <div class="flex items-center gap-4">
                                           <div
-                                            class={`text-[8px] font-black px-2 py-1 rounded-md border ${
-                                              taskIsCanceled
-                                                ? "border-red-500/30 text-red-500 bg-red-500/10"
-                                                : taskIsDone
-                                                  ? "border-green-500/30 text-green-500 bg-green-500/5"
-                                                  : "border-blue-500/30 text-blue-500 bg-blue-500/5"
-                                            }`}
+                                            class={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-all ${task.status === "CANCELLED" ? "bg-zinc-900 text-red-500 border-red-500/10" : task.status === "DONE" ? "bg-zinc-900 text-green-500 border-green-500/20" : "bg-gray-800 text-blue-400 border-white/5"}`}
                                           >
-                                            {task.status}
+                                            {task.status === "CANCELLED" ? (
+                                              <XCircle size={20} />
+                                            ) : task.status === "DONE" ? (
+                                              <CheckCircle2 size={20} />
+                                            ) : (
+                                              <User size={20} />
+                                            )}
+                                          </div>
+                                          <div>
+                                            <div
+                                              class={`text-[11px] font-black uppercase tracking-tight ${task.status === "CANCELLED" ? "text-red-500" : task.status === "DONE" ? "text-green-500" : "text-white"}`}
+                                            >
+                                              {task.assignee_name ||
+                                                "Unassigned"}
+                                            </div>
+                                            <div
+                                              class={`text-[9px] font-black uppercase tracking-[0.2em] mt-0.5 italic ${task.status === "CANCELLED" ? "text-red-900" : "text-gray-600"}`}
+                                            >
+                                              {task.title}
+                                            </div>
                                           </div>
                                         </div>
-
-                                        <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-gray-500 pt-4 border-t border-white/5">
-                                          <span>Priority</span>
-                                          <span
-                                            class={
-                                              taskIsCanceled
-                                                ? "text-red-900"
-                                                : taskIsDone
-                                                  ? "text-green-900"
-                                                  : task.priority === "URGENT"
-                                                    ? "text-red-500"
-                                                    : "text-blue-400"
-                                            }
-                                          >
-                                            {task.priority}
-                                          </span>
+                                        <div
+                                          class={`text-[8px] font-black px-2 py-1 rounded-md border ${task.status === "CANCELLED" ? "border-red-500/30 text-red-500" : task.status === "DONE" ? "border-green-500/30 text-green-500" : "border-blue-500/30 text-blue-500"}`}
+                                        >
+                                          {task.status}
                                         </div>
                                       </div>
-                                    );
-                                  }}
+                                    </div>
+                                  )}
                                 </For>
                               </div>
                             </td>
@@ -556,7 +539,6 @@ export default function TaskList() {
           </div>
         </Show>
 
-        {/* PORTAL DROPDOWN TETEP SAMA */}
         <Show when={openActionId()}>
           <Portal>
             <div
